@@ -18,6 +18,18 @@ float* create_2d_array(int cols,int rows) {
     return m;
 }
 
+void reductionfusion(float* input, int totalThreads, int blocksize, int width, int height){
+	//do a stream cpy and row min reduction
+	//sync
+	//col reduction:
+	//each block process 32 cols
+	//each warp read 1 row
+	//32 unit of shared mem
+	//shuffle through each warp for each threadidx update shared mem[threadidx]
+	//move down block for 32 rows
+	//when done, do the reduction within the block
+}
+
 void reductionThrust(float* input, int totalThreads, int blocksize, int width, int height){
 	//wrap array for thrust and transfer to device
 	thrust::device_vector<float> h_input_v(input, input + totalThreads);
@@ -44,11 +56,17 @@ void reductionThrust(float* input, int totalThreads, int blocksize, int width, i
 	thrust::reduce_by_key(
 		key_it, key_it + (rows * cols), // Keys (row indices)
 		d_data.begin(),                // Values (the actual floats)
-		d_keys_out.begin(),
+		thrust::make_discard_iterator(), // Don't waste VRAM storing row IDs
 		d_mins_out.begin(),
 		thrust::equal_to<int>(),       // Binary predicate for keys
 		thrust::minimum<float>()       // Reduction op
 	);
+
+Assuming you have:
+
+    d_data: Your original N×M array on the GPU.
+
+    d_mins_out: The N minimum values you just calculated.
 
 		// Use thrust::transform to process every single element in the original array
 	thrust::transform(
