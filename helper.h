@@ -1,0 +1,68 @@
+#include <cuda_runtime.h>
+struct matrixsize{
+	int width;
+	int height;
+};
+
+#include <time.h>
+// get time stamp for cudaevent
+inline __host__ cudaEvent_t cudagettime(void)
+{
+	cudaEvent_t time;
+	cudaEventCreate(&time);
+	cudaEventRecord(time);
+	return time;
+}
+
+// For PRIu64
+#include <cinttypes>
+//multi platform time function for host
+#if defined(_WIN32)
+#include <windows.h>
+// Windows replacement for struct timespec using QPC
+inline void get_monotonic_timespec(struct timespec *ts) {
+    static LARGE_INTEGER freq;
+    static int initialized = 0;
+
+    if (!initialized) {
+        QueryPerformanceFrequency(&freq);
+        initialized = 1;
+    }
+
+    LARGE_INTEGER counter;
+    QueryPerformanceCounter(&counter);
+
+    // Convert QPC ticks → nanoseconds
+    uint64_t ns = (uint64_t)(counter.QuadPart * 1000000000ull / freq.QuadPart);
+
+    ts->tv_sec  = ns / 1000000000ull;
+    ts->tv_nsec = ns % 1000000000ull;
+}
+inline void getstarttime(struct timespec *ts){
+	get_monotonic_timespec(ts);
+}
+inline uint64_t get_lapsed(struct timespec start) {
+    struct timespec end;
+    get_monotonic_timespec(&end);
+    uint64_t diff =
+        (uint64_t)(end.tv_sec - start.tv_sec) * 1000000000ull +
+        (uint64_t)(end.tv_nsec - start.tv_nsec);
+
+    return diff;
+}
+
+#else
+//linux version
+inline void getstarttime(struct timespec *ts){
+	clock_gettime(CLOCK_MONOTONIC, ts);
+}
+inline uint64_t get_lapsed(struct timespec start) {
+    struct timespec end;
+	// Get current time from the monotonic clock
+    clock_gettime(CLOCK_MONOTONIC, &end);
+	// Calculate difference: (seconds * 1e9) + nanoseconds
+    uint64_t diff =(uint64_t)(end.tv_sec - start.tv_sec) * 1000000000ull
+					+(uint64_t)(end.tv_nsec - start.tv_nsec);
+    return diff;
+}
+#endif
