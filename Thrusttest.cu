@@ -2,21 +2,15 @@
 #include <stdlib.h>
 #include <iostream>
 #include "helper.h"
+#include "hungarian_cpu_vectorized.h"
 #include <cinttypes>
 #include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
-
-// Create and return a pointer to an array of size rows and cols
-// populate with random value
-float* create_2d_array(int cols,int rows) {
-    float* m = (float*)malloc(rows * cols * sizeof(float));
-	srand(time(NULL));
-    for (int i = 0; i < (rows * cols); i++) {
-		// Initialize with random number between 1-999
-        m[i] = rand() % 999+1;		
-    }
-    return m;
-}
+#include <thrust/reduce.h>
+#include <thrust/pair.h>
+#include <thrust/reduce.h>
+#include <thrust/copy.h>
+#include <thrust/iterator/discard_iterator.h>
 
 void reductionfusion(float* input, int totalThreads, int blocksize, int width, int height){
 	//do a stream cpy and row min reduction
@@ -30,9 +24,11 @@ void reductionfusion(float* input, int totalThreads, int blocksize, int width, i
 	//when done, do the reduction within the block
 }
 
-void reductionThrust(float* input, int totalThreads, int blocksize, int width, int height){
+void reductionThrust(float* input, int totalelements, int blocksize, int cols, int rows){
+		struct timespec start;
+	getstarttime(&start);
 	//wrap array for thrust and transfer to device
-	thrust::device_vector<float> h_input_v(input, input + totalThreads);
+	thrust::device_vector<float> d_input_v(input, input + totalelements);
 
 	//thrust::reduce_by_key(keys_first, keys_last, values_first, keys_output, values_output, binary_pred, binary_op);
 	/*
@@ -42,6 +38,7 @@ void reductionThrust(float* input, int totalThreads, int blocksize, int width, i
 	5. values_output: The beginning of the output range for reduced values.
 
 	The return value is a std::pair of iterators pointing to the end of the output key and value ranges, respectively. 
+	*/
 	// 1. Create keys: 0,0,0... 1,1,1... 2,2,2...
 	auto key_it = thrust::make_transform_iterator(
 		thrust::make_counting_iterator<int>(0),
@@ -49,32 +46,32 @@ void reductionThrust(float* input, int totalThreads, int blocksize, int width, i
 	);
 
 	// 2. Prepare output buffers
-	thrust::device_vector<int> d_keys_out(rows);
-	thrust::device_vector<float> d_mins_out(rows);
+	thrust::device_vector<float> row_min(rows);
 
 	// 3. Perform the reduction
 	thrust::reduce_by_key(
 		key_it, key_it + (rows * cols), // Keys (row indices)
-		d_data.begin(),                // Values (the actual floats)
+		d_input_v.begin(),                // Values (the actual floats)
 		thrust::make_discard_iterator(), // Don't waste VRAM storing row IDs
-		d_mins_out.begin(),
+		row_min.begin(),
 		thrust::equal_to<int>(),       // Binary predicate for keys
 		thrust::minimum<float>()       // Reduction op
 	);
+	/*
+	Assuming you have:
 
-Assuming you have:
+		d_data: Your original N×M array on the GPU.
 
-    d_data: Your original N×M array on the GPU.
-
-    d_mins_out: The N minimum values you just calculated.
+		d_mins_out: The N minimum values you just calculated.
 
 		// Use thrust::transform to process every single element in the original array
+	*/
 	thrust::transform(
 		thrust::make_counting_iterator<int>(0),           // Global index (0 to N*M - 1)
 		thrust::make_counting_iterator<int>(rows * cols), 
-		d_data.begin(),                                   // Input: original values
-		d_data.begin(),                                   // Output: overwritten values
-		[cols, raw_mins = thrust::raw_pointer_cast(d_mins_out.data())] __device__ (int i, float val) {
+		d_input_v.begin(),                                   // Input: original values
+		d_input_v.begin(),                                   // Output: overwritten values
+		[cols, raw_mins = thrust::raw_pointer_cast(row_min.data())] __device__ (int i, float val) {
 			// Calculate which row this index belongs to
 			int row_idx = i / cols; 
 			
@@ -82,8 +79,38 @@ Assuming you have:
 			return val - raw_mins[row_idx];
 		}
 	);
-	
+	thrust::copy(d_input_v.begin(),d_input_v.end(),input);
+	uint64_t consumed = get_lapsed(start);
+	printf("Thrust GPU used time: %" PRIu64 "\n",consumed);
+}
+
+void execute_cpu_functions(float* input, int width, int height){
+	struct timespec start;
+	getstarttime(&start);
+	//row reduction
+	for(int i=0;i<height;i++){
+		float rowmin = INFINITY;
+		for(int j=0;j<width;j++){
+			rowmin = (input[i*width+j]<rowmin)?input[i*width+j]:rowmin;
+		}
+		for(int j=0;j<width;j++){
+			input[i*width+j]-=rowmin;
+		}
+	}
+	/*
+	//column reduction
+	for(int j=0;j<width;j++){
+		float colmin = INFINITY;
+		for(int i=0;i<height;i++){
+			colmin = (input[i*width+j]<colmin)?input[i*width+j]:colmin;
+		}
+		for(int i=0;i<height;i++){
+			input[i*width+j]-=colmin;
+		}
+	}
 	*/
+	uint64_t consumed = get_lapsed(start);
+	printf("CPU used time: %" PRIu64 "\n",consumed);
 }
 
 void execute_gpu_functions(float* input, int totalThreads, int blocksize, int width, int height){
@@ -128,39 +155,20 @@ int main(int argc, char** argv)
 	//make a copy 
 	float* input2 = (float*)malloc(sizeof(float)*totalThreads);
 	std::copy(input,input+totalThreads,input2);
-	/*
-	for(int i=0;i<height;i++){
-		for(int j=0;j<width;j++){
-			//input[i*width+j]=(float)(i*width+j+1);
-				printf("%.2f ",input[i*width+j]);
-		}
-		printf("\n");
-	}
-	printf("\nafterprocessing\n");
-	*/
-	//execute_cpu_functions(input2,width,height);
-	//execute_gpu_functions(input,totalThreads,blockSize,width,height);
-	/*
-	for(int i=0;i<height;i++){
-		for(int j=0;j<width;j++){
-		
-				printf("%.2f ",input[i*width+j]);
-		}
-		printf("\n");
-	}
-	*/
+	
+	//printmatrix(input,width,height);
+	//printf("\nafterprocessing\n");
+	
+	execute_cpu_functions(input2,width,height);
+	execute_gpu_functions(input,totalThreads,blockSize,width,height);
+	
+	//printmatrix(input,width,height);
+	
 	/*
 	//transposed
-	for(int j=0;j<width;j++){
-		for(int i=0;i<height;i++){
-		
-				printf("%.2f ",input[j*height+i]);
-		}
-		printf("\n");
-	}
-*/
+	printmatrix(input,width,height);
+	*/
 	//validate cpu and gpu results
-	
 	
 	//transpose stage validation
 	/*

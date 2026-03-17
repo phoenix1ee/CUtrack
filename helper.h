@@ -1,8 +1,32 @@
+// Create and return a pointer to an array of size rows and cols
+// populate with random value
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <iostream>
+#include <cinttypes>
+
+inline float* create_2d_array(int cols,int rows) {
+    float* m = (float*)malloc(rows * cols * sizeof(float));
+	srand(time(NULL));
+    for (int i = 0; i < (rows * cols); i++) {
+		// Initialize with random number between 1-999
+        m[i] = rand() % 999+1;		
+    }
+    return m;
+}
+
+inline void printmatrix(float*input,int cols,int rows){
+    for(int i=0;i<rows;i++){
+		for(int j=0;j<cols;j++){
+		
+				printf("%6.2f ",input[i*cols+j]);
+		}
+		printf("\n");
+	}
+}
+
 #include <cuda_runtime.h>
-struct matrixsize{
-	int width;
-	int height;
-};
 
 #include <time.h>
 // get time stamp for cudaevent

@@ -1,10 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
-#include "helper.h"
 #include <cinttypes>
-#include "hungarian_cpu_vectorized.h"
-
+#include <cuda_runtime.h>
+#include "helper.h"
+#include "sort_lib.h"
+#include <device_launch_parameters.h>
 
 __global__ void rowreduction(float *a, int matrixwidth, int matrixheight){
     //row reduction
@@ -367,8 +368,7 @@ void reductionglobalmem(float* input, int totalThreads, int blocksize, int width
 	cudaDeviceSynchronize();
 	cudaFree(d_input);
 	cudaFree(d_temp);
-	
-	//printf("Global memory-GPU used time: %" PRIu64 "\n",consumed);
+
 }
 
 void reductionmappedmem(float* input, int totalThreads, int blocksize, int width, int height)
@@ -415,7 +415,6 @@ void reductionmappedmem(float* input, int totalThreads, int blocksize, int width
 	}
 	cudaHostUnregister(input);
 
-	//printf("Mapped memory-GPU used time: %" PRIu64 "\n",consumed);
 }
 
 
@@ -449,156 +448,4 @@ void reductionStreamMemory(float* input, int totalThreads, int blocksize, int wi
 	cudaHostUnregister(input);
 	cudaFree(d_input);
 	cudaFree(d_temp);
-
-	//printf("stream memory-GPU used time: %" PRIu64 "\n",consumed);
-}
-
-void execute_cpu_functions(float* input, int width, int height){
-	struct timespec start;
-	getstarttime(&start);
-
-	reduction_avx(input,width,height);
-	uint64_t consumed = get_lapsed(start);
-	printf("CPU used time: %" PRIu64 "\n",consumed);
-	//printf("%  " PRIu64 , consumed);
-}
-
-void execute_gpu_functions(float* input, int totalThreads, int blocksize, int width, int height){
-	//make a copy 
-	float* backup = (float*)malloc(sizeof(float)*totalThreads);
-	std::copy(input,input+totalThreads,backup);
-
-	struct timespec start;
-	getstarttime(&start);
-	//run global memory version
-	reductionglobalmem(input, totalThreads, blocksize, width, height);
-	uint64_t consumed = get_lapsed(start);
-	printf("global memory-GPU used time: %" PRIu64 "\n",consumed);
-	//printf(" % " PRIu64 , consumed);
-
-	//copy back to input
-	std::copy(backup,backup+totalThreads,input);
-
-	struct timespec start2;
-	getstarttime(&start2);
-	//run mapped memory version
-	reductionmappedmem(input, totalThreads, blocksize, width, height);
-	uint64_t consumed2 = get_lapsed(start2);
-	printf("global memory-GPU used time: %" PRIu64 "\n",consumed2);
-	//printf(" % " PRIu64 , consumed2);
-
-	//copy back to input
-	std::copy(backup,backup+totalThreads,input);
-
-	struct timespec start3;
-	getstarttime(&start3);
-	//run streaming memory version
-	reductionStreamMemory(input, totalThreads, blocksize, width, height);
-	uint64_t consumed3 = get_lapsed(start3);
-	printf("global memory-GPU used time: %" PRIu64 "\n",consumed3);
-	//printf(" % " PRIu64 , consumed3);
-
-	free(backup);
-
-}
-
-int main(int argc, char** argv)
-{
-	// read command line arguments
-	int totalThreads = (1 << 24);
-	int blockSize = 256;
-	
-	if (argc >= 2) {
-		totalThreads = atoi(argv[1]);
-	}
-	if (argc >= 3) {
-		blockSize = atoi(argv[2]);
-	}
-
-	int numBlocks = totalThreads/blockSize;
-
-	// validate command line arguments
-	if (totalThreads % blockSize != 0) {
-		++numBlocks;
-		totalThreads = numBlocks*blockSize;
-		
-		printf("Warning: Total thread count is not evenly divisible by the block size\n");
-		printf("The total number of threads will be rounded up to %d\n", totalThreads);
-	}
-	//create the array
-	int width = (int)sqrt(totalThreads);
-	int height = (int)sqrt(totalThreads);
-	if (width*height!=totalThreads){
-		while(totalThreads%width!=0){
-			width +=1;
-		}
-		height = totalThreads / width;
-	}
-	//printf("matrix created for row and column reduction, row: %d, columns: %d\n",height,width);
-	float* input = create_2d_array(width,height);
-	//make a copy 
-	float* input2 = (float*)malloc(sizeof(float)*totalThreads);
-	std::copy(input,input+totalThreads,input2);
-	/*
-	for(int i=0;i<height;i++){
-		for(int j=0;j<width;j++){
-			//input[i*width+j]=(float)(i*width+j+1);
-				printf("%.2f ",input[i*width+j]);
-		}
-		printf("\n");
-	}
-	printf("\nafterprocessing\n");
-	*/
-	execute_cpu_functions(input2,width,height);
-	execute_gpu_functions(input,totalThreads,blockSize,width,height);
-	/*
-	for(int i=0;i<height;i++){
-		for(int j=0;j<width;j++){
-		
-				printf("%.2f ",input[i*width+j]);
-		}
-		printf("\n");
-	}
-	*/
-	/*
-	//transposed
-	for(int j=0;j<width;j++){
-		for(int i=0;i<height;i++){
-		
-				printf("%.2f ",input[j*height+i]);
-		}
-		printf("\n");
-	}
-*/
-	//validate cpu and gpu results
-	
-	
-	//transpose stage validation
-	/*
-	for(int i=0;i<height;i++){
-		for(int j=0;j<width;j++){
-			if (input2[i*width+j]!=input[j*height+i]){
-				printf("discrepancy found row: %d col: %d",i,j);
-				printf("cpu: %.2f, gpu: %.2f\n", input2[i*width+j],input[j*height+i]);
-				break;
-			}
-		}
-	}
-	*/
-	
-	//final stage validation
-	
-	for(int i=0;i<height;i++){
-		for(int j=0;j<width;j++){
-			if (input2[i*width+j]!=input[i*width+j]){
-				printf("discrepancy found row: %d col: %d",i,j);
-				printf("cpu: %.2f, gpu: %.2f\n", input2[i*width+j],input[i*width+j]);
-				break;
-			}
-		}
-	}
-	
-	free(input2);
-	free(input);
-	return 0;
 }

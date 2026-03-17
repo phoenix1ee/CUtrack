@@ -1,27 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
-#include "helper.h"
 
 #include <cinttypes>
-
-// Create and return a pointer to an array of size rows and cols
-// populate with random value
-float* create_2d_array(int cols,int rows) {
-    float* m = (float*)malloc(rows * cols * sizeof(float));
-	srand(time(NULL));
-    for (int i = 0; i < (rows * cols); i++) {
-		// Initialize with random number between 1-999
-        m[i] = rand() % 999+1;		
-    }
-    return m;
-}
 
 #include <immintrin.h>
 #include <algorithm>
 #include <float.h>
 
-void row_min_subtraction_avx(float* data, int rows, int cols) {
+inline void row_min_subtraction_avx(float* data, int rows, int cols) {
     for (int i = 0; i < rows; ++i) {
         float* row_ptr = data + (i * cols);
         
@@ -60,7 +47,7 @@ void row_min_subtraction_avx(float* data, int rows, int cols) {
     }
 }
 
-void col_min_subtraction_avx(float* data, int rows, int cols) {
+inline void col_min_subtraction_avx(float* data, int rows, int cols) {
     int j = 0;
 
     // Process 8 columns at a time
@@ -93,60 +80,9 @@ void col_min_subtraction_avx(float* data, int rows, int cols) {
 }
 
 
-void reduction_avx(float* input, int width, int height){
-    struct timespec start;
-	getstarttime(&start);
+inline void reduction_avx(float* input, int width, int height){
 
     row_min_subtraction_avx(input,height,width);
     col_min_subtraction_avx(input,height,width);
 
-	uint64_t consumed = get_lapsed(start);
-	printf("AVX CPU used time: %" PRIu64 "\n",consumed);
-}
-
-void execute_cpu_functions(float* input, float* input2, int width, int height){
-    reduction_avx(input,width,height);
-}
-
-int main(int argc, char** argv)
-{
-	// read command line arguments
-	int totalThreads = (1 << 24);
-	int blockSize = 256;
-	
-	if (argc >= 2) {
-		totalThreads = atoi(argv[1]);
-	}
-	if (argc >= 3) {
-		blockSize = atoi(argv[2]);
-	}
-
-	int numBlocks = totalThreads/blockSize;
-
-	// validate command line arguments
-	if (totalThreads % blockSize != 0) {
-		++numBlocks;
-		totalThreads = numBlocks*blockSize;
-		
-		printf("Warning: Total thread count is not evenly divisible by the block size\n");
-		printf("The total number of threads will be rounded up to %d\n", totalThreads);
-	}
-	//create the array
-	int width = (int)sqrt(totalThreads);
-	int height = (int)sqrt(totalThreads);
-	if (width*height!=totalThreads){
-		while(totalThreads%width!=0){
-			width +=1;
-		}
-		height = totalThreads / width;
-	}
-	printf("matrix created for row and column reduction, row: %d, columns: %d\n",height,width);
-	float* input = create_2d_array(width,height);
-
-	execute_cpu_functions(input,input2,width,height);
-	
-
-	free(input2);
-	free(input);
-	return 0;
 }
