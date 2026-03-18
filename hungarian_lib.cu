@@ -5,7 +5,11 @@
 #include <cuda_runtime.h>
 #include "helper.h"
 #include "sort_lib.h"
-#include <device_launch_parameters.h>
+
+
+__global__ void RowColreduction(float *a, int matrixwidth, int matrixheight){
+
+}
 
 __global__ void rowreduction(float *a, int matrixwidth, int matrixheight){
     //row reduction

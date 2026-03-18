@@ -5,7 +5,68 @@
 #include <cinttypes>
 #include "hungarian_cpu_vectorized.h"
 
+__global__ void dummykernel(void){
 
+}
+
+__global__ void colreduction(float *input, int matrixwidth, int matrixheight){
+	int blockoffset = (gridDim.x*blockIdx.y) + blockIdx.x;
+	int gridsize = gridDim.x*gridDim.y;
+	if (blockoffset >= matrixwidth) return;
+	//a tile of 32*32
+	__shared__ float sharedArray[32][33];
+	__shared__ float sharedmin[32];
+	//each blocks process 32 cols
+	// assume blockDim.x=32
+	int tid = threadIdx.y*32+threadIdx.x;
+	if(tid<32){
+		sharedmin[tid]=INFINITY;
+	}
+    int lane   = tid & 31;
+	//loop thru each grid size across cols
+	//each blocks process 32 cols
+	for(int col=blockoffset*32;col<matrixwidth;col+=32*gridsize){
+		//every 32 rows, a block read a tile of matrix to shared array
+		for(int tileoffset=0;tileoffset<matrixheight;tileoffset+=32){
+			//within each tile, a block iterate to read matrix and write to the sharedmem
+			for(int row = threadIdx.y;row<32;row+=blockDim.y){
+				int input_row = tileoffset+row;
+				int input_col = col + threadIdx.x;
+				if(input_row<matrixheight && input_col<matrixwidth){
+					//within the matrix
+					sharedArray[row][threadIdx.x]=input[input_row*matrixwidth+input_col];
+				}
+				else{
+					//outside matrix, put inf to sharemem value
+					sharedArray[row][threadIdx.x]=INFINITY;
+				}
+			}
+			__syncthreads();
+			//use the block to read through each tile
+			for(int j=threadIdx.y;j<32;j+=blockDim.y){
+				//within each tile, each warp in block read a column of shared array
+				float localmin = sharedArray[threadIdx.x][j];
+				//shuffle to found min of each warp
+				for (int offset = 16; offset > 0; offset = offset /2) {
+					localmin = min(localmin, __shfl_down_sync(0xffffffff, localmin, offset));
+				}
+				//at lane 0, check if value found is smaller than sharedmin and update
+				if (lane == 0 && localmin<sharedmin[j]) {
+					sharedmin[j] = localmin;
+				}
+			}
+			__syncthreads();
+		}
+		__syncthreads();
+		//after iterate through all rows, each col's min is at sharedmin[]
+		for(int row=threadIdx.y;row<matrixheight;row+=blockDim.y){
+			input[row*matrixwidth+col+threadIdx.x]-=sharedmin[threadIdx.x];
+		}
+		__syncthreads();
+	}
+	__syncthreads();
+	return;
+}
 __global__ void rowreduction(float *a, int matrixwidth, int matrixheight){
     //row reduction
 	int blockoffset = (gridDim.x*blockIdx.y) + blockIdx.x;
@@ -453,6 +514,40 @@ void reductionStreamMemory(float* input, int totalThreads, int blocksize, int wi
 	//printf("stream memory-GPU used time: %" PRIu64 "\n",consumed);
 }
 
+
+void reductionNotranspose(float* input, int totalThreads, int blocksize, int width, int height)
+{
+	//update the constant value
+	//updatematrixsize(width,height);
+	//launch kernel that using normal global memory
+	//allocate device global memory for an input array and a buffer array of same size
+	float* d_input;
+	float* d_temp;
+
+	cudaMalloc((void**)&d_input,sizeof(float)*totalThreads);
+	cudaMalloc((void**)&d_temp,sizeof(float)*totalThreads);
+	cudaMemcpy(d_input,input,sizeof(float)*totalThreads,cudaMemcpyHostToDevice);
+	//define grid and block size
+	dim3 dimBlock(32, blocksize/32, 1 );
+	dim3 dimGrid((totalThreads+blocksize-1)/blocksize, 1, 1 );
+	rowreduction<<<dimGrid,dimBlock>>>(d_input,width,height);
+	cudaDeviceSynchronize();
+	//colreduction<<<dimGrid,dimBlock>>>(d_input,width,height);
+	cudaDeviceSynchronize();
+	//updatematrixsize(width,height);
+	
+	cudaError_t error = cudaGetLastError();
+	if (error !=cudaSuccess){
+		printf("kernel failed");
+	}
+	cudaMemcpy(input,d_input,sizeof(float)*totalThreads,cudaMemcpyDeviceToHost);
+	cudaDeviceSynchronize();
+	cudaFree(d_input);
+	cudaFree(d_temp);
+	
+	//printf("Global memory-GPU used time: %" PRIu64 "\n",consumed);
+}
+
 void execute_cpu_functions(float* input, int width, int height){
 	struct timespec start;
 	getstarttime(&start);
@@ -468,6 +563,8 @@ void execute_gpu_functions(float* input, int totalThreads, int blocksize, int wi
 	float* backup = (float*)malloc(sizeof(float)*totalThreads);
 	std::copy(input,input+totalThreads,backup);
 
+	dummykernel<<<1,1>>>();
+	/*
 	struct timespec start;
 	getstarttime(&start);
 	//run global memory version
@@ -496,6 +593,15 @@ void execute_gpu_functions(float* input, int totalThreads, int blocksize, int wi
 	reductionStreamMemory(input, totalThreads, blocksize, width, height);
 	uint64_t consumed3 = get_lapsed(start3);
 	printf("global memory-GPU used time: %" PRIu64 "\n",consumed3);
+	//printf(" % " PRIu64 , consumed3);
+	*/
+
+	struct timespec start4;
+	getstarttime(&start4);
+	//run streaming memory version
+	reductionNotranspose(input, totalThreads, blocksize, width, height);
+	uint64_t consumed4 = get_lapsed(start4);
+	printf("allinonekernel-globalmem-GPU used time: %" PRIu64 "\n",consumed4);
 	//printf(" % " PRIu64 , consumed3);
 
 	free(backup);
@@ -539,27 +645,13 @@ int main(int argc, char** argv)
 	//make a copy 
 	float* input2 = (float*)malloc(sizeof(float)*totalThreads);
 	std::copy(input,input+totalThreads,input2);
-	/*
-	for(int i=0;i<height;i++){
-		for(int j=0;j<width;j++){
-			//input[i*width+j]=(float)(i*width+j+1);
-				printf("%.2f ",input[i*width+j]);
-		}
-		printf("\n");
-	}
+	
+	printmatrix(input,width,height);
 	printf("\nafterprocessing\n");
-	*/
+	
 	execute_cpu_functions(input2,width,height);
 	execute_gpu_functions(input,totalThreads,blockSize,width,height);
-	/*
-	for(int i=0;i<height;i++){
-		for(int j=0;j<width;j++){
-		
-				printf("%.2f ",input[i*width+j]);
-		}
-		printf("\n");
-	}
-	*/
+	printmatrix(input,width,height);
 	/*
 	//transposed
 	for(int j=0;j<width;j++){
@@ -591,7 +683,7 @@ int main(int argc, char** argv)
 	for(int i=0;i<height;i++){
 		for(int j=0;j<width;j++){
 			if (input2[i*width+j]!=input[i*width+j]){
-				printf("discrepancy found row: %d col: %d",i,j);
+				printf("discrepancy found row: %d col: %d ",i,j);
 				printf("cpu: %.2f, gpu: %.2f\n", input2[i*width+j],input[i*width+j]);
 				break;
 			}
