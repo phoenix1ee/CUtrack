@@ -4,11 +4,15 @@
 #include <cuda_runtime.h>
 
 // A wrapper function that calls the GPU kernel
-void reductionStreamMemory(float* input, int totalThreads, int blocksize, int width, int height);
+void reductionStreamMemory(float* input, int totalsize, int blocksize, int width, int height);
 
-void reductionmappedmem(float* input, int totalThreads, int blocksize, int width, int height);
+void reductionmappedmem(float* input, int totalsize, int blocksize, int width, int height);
 
-void reductionglobalmem(float* input, int totalThreads, int blocksize, int width, int height);
+void reductionglobalmem(float* input, int totalsize, int blocksize, int width, int height);
+
+void reductionNoTransposeStreamMemory(float* input, int totalsize, int blocksize, int width, int height);
+
+void reductionNotranspose(float* input, int totalsize, int blocksize, int width, int height);
 
 // If you want to use a __device__ function across files, use 'extern'
 // Note: This requires -rdc=true during compilation

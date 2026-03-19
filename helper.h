@@ -16,6 +16,15 @@ inline float* create_2d_array(int cols,int rows) {
     return m;
 }
 
+inline void checkmatrix(float*input,float*input2,int size){
+    for(int i=0;i<size;i++){
+        if (input[i]!=input2[i]){
+            printf("result does not match. Error detected");
+            return;
+        }
+    } 
+}
+
 inline void printmatrix(float*input,int cols,int rows){
     for(int i=0;i<rows;i++){
 		for(int j=0;j<cols;j++){

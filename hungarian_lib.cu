@@ -7,8 +7,67 @@
 #include "sort_lib.h"
 
 
-__global__ void RowColreduction(float *a, int matrixwidth, int matrixheight){
+__global__ void colreduction(float *input, int matrixwidth, int matrixheight){
+	//blockoffset = starting col of each block
+	int blockoffset = (gridDim.x*blockIdx.y) + blockIdx.x;
+	int gridsize = gridDim.x*gridDim.y;
+	if (blockoffset >= matrixwidth) return;
+	//a tile of 32*32
+	__shared__ float sharedArray[32][33];
+	//32 min for 32 cols
+	__shared__ float sharedmin[33];
+	//each blocks process 32 cols
+	//assume block width/blockDim.x=32
+	int tid = threadIdx.y*32+threadIdx.x;
+	//loop thru each grid size across cols
+	//each blocks process 32 cols
+	for(int col=blockoffset*32;col<matrixwidth;col+=32*gridsize){
+		if(tid<32){
+			sharedmin[tid]=(float)INFINITY;
+		}
+		//every 32 rows, a block read a tile of matrix to shared array
+		for(int tileoffset=0;tileoffset<matrixheight;tileoffset+=32){
+			//within each tile, a block iterate downward to read a total of 32 rows of the tile and write to the sharedmem
+			for(int tile_row = threadIdx.y;tile_row<32;tile_row+=blockDim.y){
+				int input_row = tileoffset+tile_row;
+				int input_col = col + threadIdx.x;
+				if(input_row<matrixheight && input_col<matrixwidth){
+					//within the matrix
+					sharedArray[tile_row][threadIdx.x]=input[input_row*matrixwidth+input_col];
+				}
+				else{
+					//outside matrix, put inf to sharemem value
+					sharedArray[tile_row][threadIdx.x]=(float)INFINITY;
+				}
+			}
+			__syncthreads();
+			//use the block to read through each tile
+			for(int j=threadIdx.y;j<32;j+=blockDim.y){
+				//within each tile, each warp in block read a column of shared array
+				float localmin = sharedArray[threadIdx.x][j];
 
+				//shuffle to found min of each warp
+				for (int offset = 16; offset > 0; offset = offset /2) {
+					localmin = min(localmin, __shfl_down_sync(0xffffffff, localmin, offset));
+				}
+				//at lane 0, check if value found is smaller than sharedmin and update
+				if (threadIdx.x == 0 && localmin<sharedmin[j]) {
+					sharedmin[j] = localmin;
+				}
+			}
+
+		}
+		__syncthreads();
+		//after iterate through all rows, each col's min is at sharedmin[]
+		for(int row=threadIdx.y;row<matrixheight;row+=blockDim.y){
+			if (col+threadIdx.x<matrixwidth){
+				input[row*matrixwidth+col+threadIdx.x]-=sharedmin[threadIdx.x];
+			}
+		}
+		__syncthreads();
+	}
+	__syncthreads();
+	return;
 }
 
 __global__ void rowreduction(float *a, int matrixwidth, int matrixheight){
@@ -198,7 +257,63 @@ __global__ void rowreductionOnStream(float *a,int strMwidth, int strMheight){
     }
 }
 
-void reductionTransposestream1(float* input, float*d_input, float*d_temp, int totalThreads, int blocksize, int width, int height){
+void memcpyAndrowreductionstream(float* input, float*d_input, int totalsize, int blocksize, int width, int height){
+	//wrapper function for use streams and async memcpy for the reduction kernels
+
+	//set a partition size to partition the array for reduction
+	//use multiples of rows
+	//say 32 rows per partitions
+	int partitionheight = 32;
+	int partitioncount=height/partitionheight+1;
+	int partitionSize = width*partitionheight;
+	cudaStream_t streamCopy, streamCompute;
+	cudaStreamCreate(&streamCopy);
+	cudaStreamCreate(&streamCompute);
+
+	//Use an array of events to track copying of all partitions
+	cudaEvent_t* copyDone=(cudaEvent_t*)malloc(sizeof(cudaEvent_t)*partitioncount);
+
+	dim3 dimBlock(32, blocksize/32, 1 );
+	dim3 dimGrid(32, 1, 1 );
+
+	for (int i = 0; i < partitioncount; i++) {
+		//printf("get into loop");
+		cudaEventCreate(&copyDone[i]);
+		//printf("finishe creation event");
+		// Calculate the pointer offset for this partition
+		int offset = i * partitionSize;
+
+		//check for the last partitions
+		int currentSize = (i == partitioncount - 1) ? (totalsize - offset) : partitionSize;
+		int currentHeight = currentSize/width;
+		// Start Async Copy in the Transfer Stream
+		// Copy just 1 row each time
+		cudaMemcpyAsync(d_input + offset, input + offset, 
+						currentSize * sizeof(float), 
+						cudaMemcpyHostToDevice, streamCopy);
+
+		//printf("start memcpy");
+		// Record an event in the Transfer Stream after copy
+		cudaEventRecord(copyDone[i], streamCopy);
+
+		//printf("mark record");
+		// Make Compute Stream wait for THIS specific partition's event
+		cudaStreamWaitEvent(streamCompute, copyDone[i], 0);
+
+		//printf("mark wait");
+		// Launch the Kernel in the Compute Stream when copyDone[i] is signaled
+		// Launch the kernel on only 1 partition of the data
+		rowreductionOnStream<<<dimGrid, dimBlock, 0, streamCompute>>>(d_input+offset,width,currentHeight);
+
+	}
+	cudaStreamSynchronize(streamCompute);
+	cudaStreamDestroy(streamCopy);
+	cudaStreamDestroy(streamCompute);
+
+	free(copyDone);
+}
+
+void memcpy_reduction_Transpose_stream(float* input, float*d_input, float*d_temp, int totalsize, int blocksize, int width, int height){
 	//wrapper function for use streams and async memcpy for the reduction kernels
 
 	//set a partition size to partition the array for reduction
@@ -230,7 +345,7 @@ void reductionTransposestream1(float* input, float*d_input, float*d_temp, int to
 		int offset = i * partitionSize;
 
 		//check for the last partitions
-		int currentSize = (i == partitioncount - 1) ? (totalThreads - offset) : partitionSize;
+		int currentSize = (i == partitioncount - 1) ? (totalsize - offset) : partitionSize;
 		int currentHeight = currentSize/width;
 		// Start Async Copy in the Transfer Stream
 		// Copy just 1 row each time
@@ -270,7 +385,7 @@ void reductionTransposestream1(float* input, float*d_input, float*d_temp, int to
 	free(Reduction1Done);
 }
 
-void reductionTransposestream2(float* input, float*d_input, float*d_temp, int totalThreads, int blocksize, int width, int height){
+void reduction_Transpose_stream(float* input, float*d_input, float*d_temp, int totalsize, int blocksize, int width, int height){
 	//wrapper function for use streams and async memcpy for the reduction kernels
 	// this is the second part: second reduction, transpose back and memcpy back
 
@@ -304,7 +419,7 @@ void reductionTransposestream2(float* input, float*d_input, float*d_temp, int to
 		int offset = i * partitionSize;
 
 		//check for the last partitions
-		int currentSize = (i == partitioncount - 1) ? (totalThreads - offset) : partitionSize;
+		int currentSize = (i == partitioncount - 1) ? (totalsize - offset) : partitionSize;
 		int currentHeight = currentSize/width;
 		// Launch the Kernel in the Compute Stream when copyDone[i] is signaled
 		// Launch the kernel on only 1 partition of the data
@@ -338,7 +453,7 @@ void reductionTransposestream2(float* input, float*d_input, float*d_temp, int to
 	free(Transpose2Done);
 }
 
-void reductionglobalmem(float* input, int totalThreads, int blocksize, int width, int height)
+void reductionglobalmem(float* input, int totalsize, int blocksize, int width, int height)
 {
 	//update the constant value
 	//updatematrixsize(width,height);
@@ -347,12 +462,12 @@ void reductionglobalmem(float* input, int totalThreads, int blocksize, int width
 	float* d_input;
 	float* d_temp;
 
-	cudaMalloc((void**)&d_input,sizeof(float)*totalThreads);
-	cudaMalloc((void**)&d_temp,sizeof(float)*totalThreads);
-	cudaMemcpy(d_input,input,sizeof(float)*totalThreads,cudaMemcpyHostToDevice);
+	cudaMalloc((void**)&d_input,sizeof(float)*totalsize);
+	cudaMalloc((void**)&d_temp,sizeof(float)*totalsize);
+	cudaMemcpy(d_input,input,sizeof(float)*totalsize,cudaMemcpyHostToDevice);
 	//define grid and block size
 	dim3 dimBlock(32, blocksize/32, 1 );
-	dim3 dimGrid((totalThreads+blocksize-1)/blocksize, 1, 1 );
+	dim3 dimGrid((totalsize+blocksize-1)/blocksize, 1, 1 );
 	rowreduction<<<dimGrid,dimBlock>>>(d_input,width,height);
 	cudaDeviceSynchronize();
 	transpose<<<dimGrid,dimBlock>>>(d_input,d_temp,width,height);
@@ -366,16 +481,16 @@ void reductionglobalmem(float* input, int totalThreads, int blocksize, int width
 	
 	cudaError_t error = cudaGetLastError();
 	if (error !=cudaSuccess){
-		printf("kernel failed");
+		printf("kernel failed-globalmem\n");
 	}
-	cudaMemcpy(input,d_input,sizeof(float)*totalThreads,cudaMemcpyDeviceToHost);
+	cudaMemcpy(input,d_input,sizeof(float)*totalsize,cudaMemcpyDeviceToHost);
 	cudaDeviceSynchronize();
 	cudaFree(d_input);
 	cudaFree(d_temp);
 
 }
 
-void reductionmappedmem(float* input, int totalThreads, int blocksize, int width, int height)
+void reductionmappedmem(float* input, int totalsize, int blocksize, int width, int height)
 {
 	//update the constant value
 	//updatematrixsize(width,height);
@@ -383,12 +498,12 @@ void reductionmappedmem(float* input, int totalThreads, int blocksize, int width
 
 	cudaSetDeviceFlags(cudaDeviceMapHost);
 	//pin the allocate host memory
-	cudaHostRegister(input,sizeof(float)*totalThreads,cudaHostRegisterMapped);
+	cudaHostRegister(input,sizeof(float)*totalsize,cudaHostRegisterMapped);
 	//allocate pinned mapped memory for an input array and a buffer array of same size
 	float* d_input;
 	float* h_temp;
 	float* d_temp;
-	cudaError_t errora = cudaHostAlloc((void**)&h_temp,sizeof(float)*totalThreads,cudaHostAllocMapped);
+	cudaError_t errora = cudaHostAlloc((void**)&h_temp,sizeof(float)*totalsize,cudaHostAllocMapped);
 	if (errora != cudaSuccess){
 		printf("allcoation not success");
 	}
@@ -396,7 +511,7 @@ void reductionmappedmem(float* input, int totalThreads, int blocksize, int width
 	cudaHostGetDevicePointer((void**)&d_temp,h_temp,0);
 	//define grid and block size
 	dim3 dimBlock(32, blocksize/32, 1 );
-	dim3 dimGrid((totalThreads+blocksize-1)/blocksize, 1, 1 );
+	dim3 dimGrid((totalsize+blocksize-1)/blocksize, 1, 1 );
 	
 	rowreduction<<<dimGrid,dimBlock>>>(d_input,width,height);
 	cudaDeviceSynchronize();
@@ -421,35 +536,101 @@ void reductionmappedmem(float* input, int totalThreads, int blocksize, int width
 
 }
 
-
-void reductionStreamMemory(float* input, int totalThreads, int blocksize, int width, int height){
+void reductionStreamMemory(float* input, int totalsize, int blocksize, int width, int height){
 	//update the constant value
 	//updatematrixsize(width,height);
 	//launch kernel using pinned memory and async memcpy
 
 	cudaSetDeviceFlags(cudaDeviceMapHost);
 	//pin the input host memory
-	cudaHostRegister(input,sizeof(float)*totalThreads,cudaHostRegisterDefault);
+	cudaHostRegister(input,sizeof(float)*totalsize,cudaHostRegisterDefault);
 
 	//allocate device global memory for an input array and a buffer array of same size
 	float* d_input;
 	float* d_temp;
 
-	cudaMalloc((void**)&d_input,sizeof(float)*totalThreads);
-	cudaMalloc((void**)&d_temp,sizeof(float)*totalThreads);
+	cudaMalloc((void**)&d_input,sizeof(float)*totalsize);
+	cudaMalloc((void**)&d_temp,sizeof(float)*totalsize);
 
 	//define grid and block size
 	dim3 dimBlock(32, blocksize/32, 1 );
-	dim3 dimGrid((totalThreads+blocksize-1)/blocksize, 1, 1 );
+	dim3 dimGrid((totalsize+blocksize-1)/blocksize, 1, 1 );
 	
 	//call wrapper function
-	reductionTransposestream1(input, d_input, d_temp, totalThreads, blocksize,width,height);
+	memcpy_reduction_Transpose_stream(input, d_input, d_temp, totalsize, blocksize,width,height);
 	cudaDeviceSynchronize();
-	reductionTransposestream2(input, d_temp, d_input, totalThreads, blocksize,height,width);
+	reduction_Transpose_stream(input, d_temp, d_input, totalsize, blocksize,height,width);
 	cudaDeviceSynchronize();
 
-	cudaMemcpy(input,d_input,sizeof(float)*totalThreads,cudaMemcpyDeviceToHost);
+	cudaError_t errorb = cudaGetLastError();
+	if (errorb !=cudaSuccess){
+		printf("stream mem kernel failed");
+	}
+	cudaMemcpy(input,d_input,sizeof(float)*totalsize,cudaMemcpyDeviceToHost);
 	cudaHostUnregister(input);
 	cudaFree(d_input);
 	cudaFree(d_temp);
+}
+
+void reductionNoTransposeStreamMemory(float* input, int totalsize, int blocksize, int width, int height){
+
+	//launch kernel using pinned memory and async memcpy, and no transpose col reduction
+
+	cudaSetDeviceFlags(cudaDeviceMapHost);
+	//pin the input host memory
+	cudaHostRegister(input,sizeof(float)*totalsize,cudaHostRegisterDefault);
+
+	//allocate device global memory for an input array
+	float* d_input;
+
+	cudaMalloc((void**)&d_input,sizeof(float)*totalsize);
+
+	//define grid and block size
+	dim3 dimBlock(32, blocksize/32, 1 );
+	dim3 dimGrid((totalsize+blocksize-1)/blocksize, 1, 1 );
+	
+	//call wrapper function
+	memcpyAndrowreductionstream(input, d_input, totalsize, blocksize,width,height);
+	
+	cudaDeviceSynchronize();
+	colreduction<<<dimGrid,dimBlock>>>(d_input,width,height);
+	cudaError_t error = cudaGetLastError();
+	if (error !=cudaSuccess){
+		printf("no transpose stream kernel failed");
+	}
+	cudaDeviceSynchronize();
+
+	cudaMemcpy(input,d_input,sizeof(float)*totalsize,cudaMemcpyDeviceToHost);
+	cudaHostUnregister(input);
+	cudaFree(d_input);
+
+}
+
+void reductionNotranspose(float* input, int totalsize, int blocksize, int width, int height)
+{
+	//launch kernel that using normal global memory and no transpose col reduction
+	//allocate device global memory for an input array
+	float* d_input;
+
+	cudaMalloc((void**)&d_input,sizeof(float)*totalsize);
+	cudaMemcpy(d_input,input,sizeof(float)*totalsize,cudaMemcpyHostToDevice);
+	//define grid and block size
+	dim3 dimBlock(32, blocksize/32, 1 );
+	dim3 dimGrid((totalsize+blocksize-1)/blocksize, 1, 1 );
+
+	rowreduction<<<dimGrid,dimBlock>>>(d_input,width,height);
+	cudaDeviceSynchronize();
+
+	colreduction<<<dimGrid,dimBlock>>>(d_input,width,height);
+	cudaDeviceSynchronize();
+
+	cudaError_t error = cudaGetLastError();
+	if (error !=cudaSuccess){
+		printf("no transpose kernel failed");
+	}
+	cudaDeviceSynchronize();
+	cudaMemcpy(input,d_input,sizeof(float)*totalsize,cudaMemcpyDeviceToHost);
+	cudaDeviceSynchronize();
+	cudaFree(d_input);
+	
 }
