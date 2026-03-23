@@ -35,6 +35,15 @@ inline void printmatrix(float*input,int cols,int rows){
 	}
 }
 
+inline void printmatrix_colmajor(float*input,int cols,int rows){
+    for(int i=0;i<rows;i++){
+		for(int j=0;j<cols;j++){
+				printf("%6.3f ",input[j*rows+i]);
+		}
+		printf("\n");
+	}
+}
+
 #include <cuda_runtime.h>
 
 #include <time.h>
