@@ -4,12 +4,7 @@
 #include <cusolverDn.h>
 #include "helper.h"
 
-__global__ void testPtrs(float** arr) {
-    int i = threadIdx.x;
-    if (i == 0) {
-        printf("value = %f\n", arr[1][0]);
-    }
-}
+
 
 void cublasTranspose_simple(float* d_in, float* d_out, int o_row, int o_col){
     const float alpha = 1.0f;
