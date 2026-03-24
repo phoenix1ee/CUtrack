@@ -64,7 +64,7 @@ void execute_gpu_functions(float* input, int totalsize, int blocksize, int width
 	//run streaming memory version
 	reductionNoTransposeStreamMemory(input, totalsize, blocksize, width, height);
 	uint64_t consumed5 = get_lapsed(start5);
-	printf("allinonekernel-stream mem-GPU used time: %" PRIu64 "\n",consumed5);
+	printf("zero-transpose-kernels-stream mem-GPU used time: %" PRIu64 "\n",consumed5);
 	//printf(" % " PRIu64 , consumed3);
 
 	//copy back to input
@@ -75,7 +75,7 @@ void execute_gpu_functions(float* input, int totalsize, int blocksize, int width
 	//run streaming memory version
 	reductionNotranspose(input, totalsize, blocksize, width, height);
 	uint64_t consumed4 = get_lapsed(start4);
-	printf("allinonekernel-globalmem-GPU used time: %" PRIu64 "\n",consumed4);
+	printf("zero-transpose-kernels-globalmem-GPU used time: %" PRIu64 "\n",consumed4);
 	//printf(" % " PRIu64 , consumed3);
 
 	free(backup);

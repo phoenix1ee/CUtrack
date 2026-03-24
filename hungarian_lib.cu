@@ -257,6 +257,62 @@ __global__ void rowreductionOnStream(float *a,int strMwidth, int strMheight){
     }
 }
 
+void memcpyAndrowreductionstream_v2(float* input, float*d_input, int totalsize, int blocksize, int width, int height){
+	//wrapper function for use streams and async memcpy for the reduction kernels
+
+	//set a partition size to partition the array for reduction
+	//use multiples of rows
+	//say 32 rows per partitions
+	int partitionheight = 32;
+	int partitioncount=height/partitionheight+1;
+	int partitionSize = width*partitionheight;
+	cudaStream_t streamCopy, streamCompute;
+	cudaStreamCreate(&streamCopy);
+	cudaStreamCreate(&streamCompute);
+
+	//Use an array of events to track copying of all partitions
+	cudaEvent_t odd_copy;
+
+	dim3 dimBlock(32, blocksize/32, 1 );
+	dim3 dimGrid(32, 1, 1 );
+
+	for (int i = 0; i < partitioncount; i++) {
+		//printf("get into loop");
+		cudaEventCreate(&odd_copy);
+		//printf("finishe creation event");
+		// Calculate the pointer offset for this partition
+		int offset = i * partitionSize;
+
+		//check for the last partitions
+		int currentSize = (i == partitioncount - 1) ? (totalsize - offset) : partitionSize;
+		int currentHeight = currentSize/width;
+		// Start Async Copy in the Transfer Stream
+		// Copy just 1 row each time
+		cudaMemcpyAsync(d_input + offset, input + offset, 
+						currentSize * sizeof(float), 
+						cudaMemcpyHostToDevice, streamCopy);
+
+		//printf("start memcpy");
+		// Record an event in the Transfer Stream after copy
+		cudaEventRecord(odd_copy, streamCopy);
+		//printf("mark record");
+		// Make Compute Stream wait for THIS specific partition's event
+		cudaStreamWaitEvent(streamCompute, odd_copy, 0);
+		cudaEventSynchronize(odd_copy);
+		//printf("mark wait");
+		// Launch the Kernel in the Compute Stream when copyDone[i] is signaled
+		// Launch the kernel on only 1 partition of the data
+		rowreductionOnStream<<<dimGrid, dimBlock, 0, streamCompute>>>(d_input+offset,width,currentHeight);
+
+	}
+	
+	cudaStreamSynchronize(streamCompute);
+	cudaStreamDestroy(streamCopy);
+	cudaStreamDestroy(streamCompute);
+
+
+}
+
 void memcpyAndrowreductionstream(float* input, float*d_input, int totalsize, int blocksize, int width, int height){
 	//wrapper function for use streams and async memcpy for the reduction kernels
 
@@ -453,8 +509,7 @@ void reduction_Transpose_stream(float* input, float*d_input, float*d_temp, int t
 	free(Transpose2Done);
 }
 
-void reductionglobalmem(float* input, int totalsize, int blocksize, int width, int height)
-{
+void reductionglobalmem(float* input, int totalsize, int blocksize, int width, int height){
 	//update the constant value
 	//updatematrixsize(width,height);
 	//launch kernel that using normal global memory
@@ -490,8 +545,7 @@ void reductionglobalmem(float* input, int totalsize, int blocksize, int width, i
 
 }
 
-void reductionmappedmem(float* input, int totalsize, int blocksize, int width, int height)
-{
+void reductionmappedmem(float* input, int totalsize, int blocksize, int width, int height){
 	//update the constant value
 	//updatematrixsize(width,height);
 	//launch kernel using pinned mapped memory
@@ -606,8 +660,7 @@ void reductionNoTransposeStreamMemory(float* input, int totalsize, int blocksize
 
 }
 
-void reductionNotranspose(float* input, int totalsize, int blocksize, int width, int height)
-{
+void reductionNotranspose(float* input, int totalsize, int blocksize, int width, int height){
 	//launch kernel that using normal global memory and no transpose col reduction
 	//allocate device global memory for an input array
 	float* d_input;
