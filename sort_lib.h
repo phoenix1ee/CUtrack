@@ -3,6 +3,8 @@
 
 #include <cuda_runtime.h>
 
+
+
 // A wrapper function that calls the GPU kernel
 void reductionStreamMemory(float* input, int totalsize, int blocksize, int width, int height);
 

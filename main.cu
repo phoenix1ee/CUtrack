@@ -6,23 +6,35 @@
 #include "sort_lib.h"
 
 int main(void){
-    int width=1<<10;
-    int height=1<<10;
-    float* matrix = create_2d_array(width,height);
-	float* matrix2 = (float*)malloc(sizeof(float)*width*height);
-	std::copy(matrix,matrix+width*height,matrix2);
-	
-	//printmatrix(input,width,height);
-	//printf("\nafterprocessing\n");
-	
-	reduction_avx(matrix,width,height);
-    reductionNotranspose(matrix2, width*height,256,width,height);
-    //printmatrix(matrix,10,10);
-    
-    checkmatrix(matrix,matrix2,width*height);
 
-    free(matrix);
-    free(matrix2);
+    int Max_Tracks=2000;
+    //data structure and device correspondings
+    //track IDs
+    int* track_id=new int(Max_Tracks);
+    int* d_track_id;
+    //state variables
+    float * state = new float(Max_Tracks*7);
+    float * d_state;
+    //state covariance matrix
+    float * Pcov = new float(Max_Tracks*49);
+    float*d_Pcov;
+    //age of each tracks
+    int* age = new int(Max_Tracks);
+    int* d_age;
+    //consecutive hit for each track
+    int* hit_streak = new int(Max_Tracks);
+    int* d_hit_streak;
+    //consecutive hit for each track
+    int* time_last_update = new int(Max_Tracks);
+    int* d_time_last_update;
+    // number of active tracks
+    int count;
     
+
+    //
+    float* K=(float*)malloc(sizeof(float)*7*4*Max_Tracks);
+    float* H=(float*)malloc(sizeof(float)*7*4);
+    float* R=(float*)malloc(sizeof(float)*4*4);
+
     return 0;
 }
