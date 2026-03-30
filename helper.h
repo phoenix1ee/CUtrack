@@ -6,6 +6,11 @@
 #include <iostream>
 #include <cinttypes>
 
+//function to calculate offset with alignment
+size_t align_up(size_t offset, size_t alignment) {
+    return (offset + alignment - 1) & ~(alignment - 1);
+}
+
 inline float* create_2d_array(int cols,int rows) {
     float* m = (float*)malloc(rows * cols * sizeof(float));
 	srand(time(NULL));

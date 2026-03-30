@@ -5,17 +5,21 @@
 
 //tracker struct wrapper
 typedef struct tracker{
-    int Max_Tracks;int Max_detection;
+    int Max_Tracks;int Max_detection;   //N and M
     int m;int n;    
-    int* d_track_id;    //track IDs
-    float * d_state;    //state variables
-    float*d_Pcov;       //state covariance matrix
-    int* d_age;         //age of each tracks
-    int* d_hit_streak;  //consecutive hit for each track
-    int* d_activetracks; // number of active tracks
-    float* d_Z;         // measurement/dection buffer, m*N
-    int d_currentdetections; // number of detection get
-    float* d_K;float* d_H;float* d_R; //matrix for kalman gain
+
+    char* d_base; //base address for memory
+
+    int* d_track_id;    //track IDs   N
+    float * d_state;    //state variables   n*N
+    float*d_Pcov;       //state covariance matrix   n*n*N
+    int* d_age;         //age of each tracks    N
+    int* d_hit_streak;  //consecutive hit for each track   N
+    int* d_activetracks; // number of active tracks    1
+    float* d_Z;         // measurement/dection buffer, m*M
+    int* d_currentdetections; // number of detection get    1
+    float* d_S;float* d_K;float* d_H;float* d_R; //matrix for kalman gain
+    //     N*m*m     N*n*m       m*n        m*m
 
     //constructor
     tracker(int MT=2000,int MD=2000, int measure=4, int state=7):
@@ -23,37 +27,64 @@ typedef struct tracker{
 
     //allocate device memory for member matrix
     void allocateOnDevice(){
-        cudaMalloc((void**)&d_track_id,sizeof(int)*Max_Tracks);
-        cudaMalloc((void**)&d_state,sizeof(float)*Max_Tracks*n);
-        cudaMalloc((void**)&d_Pcov,sizeof(float)*Max_Tracks*n*n);
-        cudaMalloc((void**)&d_age,sizeof(int)*Max_Tracks);
-        cudaMalloc((void**)&d_hit_streak,sizeof(int)*Max_Tracks);
-        cudaMalloc((void**)&d_activetracks,sizeof(int));
-        cudaMalloc((void**)&d_Z,sizeof(float)*Max_detection*m);
-        cudaMalloc((void**)&d_K,sizeof(float)*n*m*Max_Tracks);
-        cudaMalloc((void**)&d_H,sizeof(float)*n*m);
-        cudaMalloc((void**)&d_R,sizeof(float)*m*m);
+        //allocate 1 big block and partition for different arrays
+        //all types are 4byte so no alignment problem
+        size_t total = (3+n+n*n+n*m+m*m)*Max_Tracks
+                    +2
+                    +Max_detection*m
+                    +n*m
+                    +m*m;
+
+        cudaMalloc((void**)&d_base,total);
+        size_t offset = 0;
+
+        d_track_id=(int*)(d_base+offset);
+        offset+=sizeof(int)*Max_Tracks;
+
+        d_state=(float*)(d_base+offset);
+        offset+=sizeof(float)*Max_Tracks*n;
+
+        d_Pcov=(float*)(d_base+offset);
+        offset+=sizeof(float)*Max_Tracks*n*n;
+
+        d_age=(int*)(d_base+offset);
+        offset+=sizeof(float)*Max_Tracks;
+
+        d_hit_streak=(int*)(d_base+offset);
+        offset+=sizeof(int)*Max_Tracks;
+
+        d_activetracks=(int*)(d_base+offset);
+        offset+=sizeof(int);
+
+        d_Z=(float*)(d_base+offset);
+        offset+=sizeof(float)*Max_detection*m;
+
+        d_currentdetections =(int*)(d_base+offset);
+        offset+=sizeof(int);
+
+        d_S=(float*)(d_base+offset);
+        offset+=sizeof(float)*m*m*Max_Tracks;
+
+        d_K=(float*)(d_base+offset);
+        offset+=sizeof(float)*n*m*Max_Tracks;
+
+        d_H=(float*)(d_base+offset);
+        offset+=sizeof(float)*n*m;
+
+        d_R=(float*)(d_base+offset);
     }
     //free the device tracker object matrix
     void freeOnDevice(){
-        cudaFree(d_track_id);
-        cudaFree(d_state);
-        cudaFree(d_Pcov);
-        cudaFree(d_age);
-        cudaFree(d_hit_streak);
-        cudaFree(d_activetracks);
-        cudaFree(d_Z);
-        cudaFree(d_K);
-        cudaFree(d_H);
-        cudaFree(d_R);
-        
+        cudaFree(d_base);        
     }
 
 }tracker;
 
+//wrapper function that calls GPU kernels / library for Kalman filter
 
 
-// A wrapper function that calls the GPU kernel
+
+// A wrapper function that calls the GPU kernel for hungarian algorithm
 void reductionStreamMemory(float* input, int totalsize, int blocksize, int width, int height);
 
 void reductionmappedmem(float* input, int totalsize, int blocksize, int width, int height);

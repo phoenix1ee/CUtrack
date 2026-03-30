@@ -1,9 +1,4 @@
 #include <stdio.h>
-//function to calculate offset with alignment
-size_t align_up(size_t offset, size_t alignment) {
-    return (offset + alignment - 1) & ~(alignment - 1);
-}
-
 #include <stddef.h>
 #include <stdlib.h>
 #include <stdio.h>
