@@ -19,3 +19,23 @@ pending
     This is the main library of all cuda kernels
     * [`hungarian_cpu_vectorized.h`](hungarian_cpu_vectorized.h)
     This the AVX accelerated CPU version of hungarian algorithm for benckmarking.
+
+project_root/
+│
+├── include/              # Public headers
+│   ├── math/
+│   │   └── vector.hpp
+│   └── utils.hpp
+│
+├── src/                  # C++ source files
+│   ├── main.cpp
+│   └── utils.cpp
+│
+├── cuda/                 # CUDA-specific code
+│   ├── kernels/
+│   │   ├── vector_add.cu
+│   │   └── vector_add.cuh
+│   └── memory.cu
+│
+├── build/                # Build output (ignored in git)
+└── CMakeLists.txt

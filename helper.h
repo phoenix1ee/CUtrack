@@ -6,8 +6,18 @@
 #include <iostream>
 #include <cinttypes>
 
+//print matrix on device kernel
+__device__ inline void printmatrix_colmajor_ondevice(float*d_input,int cols,int rows){
+    for(int i=0;i<rows;i++){
+		for(int j=0;j<cols;j++){
+				printf("%6.3f ",d_input[j*rows+i]);
+		}
+		printf("\n");
+	}
+}
+
 //function to calculate offset with alignment
-size_t align_up(size_t offset, size_t alignment) {
+inline size_t align_up(size_t offset, size_t alignment) {
     return (offset + alignment - 1) & ~(alignment - 1);
 }
 

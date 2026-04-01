@@ -5,6 +5,57 @@
 #include "helper.h"
 #include "sort_lib.h"
 
+__global__ void printS(float* d_S,float**d_S_0){
+    printf("I am here");
+    printf("d_S: %p d_each_S 0:%p\n",d_S,d_S_0[0]);
+}
+
+__global__ void MMAdd1toMany(float* batchedA, float* singleB, int row, int col, int batchCount){
+    int blockid = (gridDim.x*blockIdx.y) + blockIdx.x;
+	int gridsize = gridDim.x*gridDim.y;
+	if (blockid >= batchCount) return;
+    //use 1 block for each matrix A
+    //use shared mem to store the single matrix, size row*col declared at kernel launch
+    extern __shared__ float B[];
+    int blocksize = blockDim.x*blockDim.y;
+    int tid = threadIdx.y*blockDim.x+threadIdx.x;
+    for(int i=tid;i<row*col;i+=blocksize){
+        B[i]=singleB[i];
+    }
+    for(int mid = blockid;mid<batchCount;mid+=gridsize){
+        for(int j=tid;j<row*col;j+=blocksize){
+            //printf("HPHT is %.2f\n",batchedA[mid*row*col+j]);
+            batchedA[mid*row*col+j]+=B[j];
+        }
+    }
+}
+
+__global__ void KSaddrInitialize(tracker *d_tracker){
+    int blockid = (gridDim.x*blockIdx.y) + blockIdx.x;
+    int blocksize = blockDim.x*blockDim.y;
+	int gridsize = gridDim.x*gridDim.y;
+    int tid = threadIdx.y*blockDim.x+threadIdx.x;
+    int globalid=blockid*blocksize+tid;
+    for(int i=globalid;i<d_tracker->Max_Tracks;i+=gridsize*blocksize){
+        //printf("n: %d m: %d\n",d_tracker->n,d_tracker->m);
+        d_tracker->d_each_K[i]=d_tracker->d_K+i*d_tracker->n*d_tracker->m;
+        d_tracker->d_each_S[i]=d_tracker->d_S+i*d_tracker->m*d_tracker->m;
+        //printf("d_S %d: %p d_K %d: %p\n",i,d_tracker->d_each_S[i],i,d_tracker->d_each_K[i]);
+    }
+}
+
+__global__ void print_device_matrix_kernel(float*d_input,int cols,int rows){
+    for(int i=0;i<rows;i++){
+		for(int j=0;j<cols;j++){
+				printf("%6.3f ",d_input[j*rows+i]);
+		}
+		printf("\n");
+	}
+}
+void print_device_matrix_colmajor_from_host(float*d_input,int cols,int rows){
+    print_device_matrix_kernel<<<1,1>>>(d_input,cols,rows);
+    cudaDeviceSynchronize();
+}
 
 void cublasTranspose_simple(float* d_in, float* d_out, int o_row, int o_col){
     const float alpha = 1.0f;
@@ -215,7 +266,7 @@ void predict_positions(float* d_F, float* d_x, int num_objects) {
     cublasmmulti(d_F,d_x,d_x,false,false,4,num_objects,4);
 }
 
-void kalman_gain_batch(bool*inactive, float*d_PHT, float*d_P,float*d_H,float*d_R,int totaltracks, int m, int n){
+void kalman_gain_batch(bool*inactive, float* d_S, float*d_PHT, float*d_P,float*d_H,float*d_R,int totaltracks, int m, int n){
     //solve for Kalman gain for a batch of P, H and R
     //P=n*n H=m*n R=m*m   for totaltracks no. of tracks
     //K = P*H^T*S^-1,  S=H*P*H^T+R
@@ -224,8 +275,6 @@ void kalman_gain_batch(bool*inactive, float*d_PHT, float*d_P,float*d_H,float*d_R
     //H_k, R_k
 
     //PHT version
-    float* d_S;
-    cudaMalloc((void**)&d_S, sizeof(float)*m*m*totaltracks);
 
     const float alpha = 1.0f;
     const float beta = 0.0f;
@@ -346,10 +395,154 @@ void kalman_gain_batch(bool*inactive, float*d_PHT, float*d_P,float*d_H,float*d_R
                         d_each_d_PHT,n,
                         totaltracks);    
     cudaDeviceSynchronize();
-    //d_PHT no contains kalman gain matrix n*m.
+    //d_PHT now contains kalman gain matrix n*m.
 
     cublasDestroy(handle);
 
-    cudaFree(d_S);
+
+    }
+
+void tracker_kalman_gain(tracker* trackerA, int totaltracks){
+    
+    float*d_S = trackerA->d_S;
+
+    float*d_PHT=trackerA->d_K;
+    float*d_P=trackerA->d_Pcov;
+    float*d_H=trackerA->d_H;
+    float*d_R=trackerA->d_R;
+    int m = trackerA->m; int n=trackerA->n;
+    
+    //solve for Kalman gain for a batch of P, H and R
+    //P=n*n H=m*n R=m*m   for totaltracks no. of tracks
+    //K = P*H^T*S^-1,  S=H*P*H^T+R
+    //All matrix
+    //P_k|k-1 = Predicted estimate covariance
+    //H_k, R_k
+
+    //PHT version
+
+    const float alpha = 1.0f;
+    const float beta = 0.0f;
+
+    cublasHandle_t handle;
+    cublasCreate(&handle);
+
+    //calculate PH^T, n*m
+    cublasStatus_t cuA = cublasSgemmStridedBatched(handle, CUBLAS_OP_N, CUBLAS_OP_T,
+                                  n, m, n,
+                                  &alpha,
+                                  d_P, n, n*n,
+                                  d_H, m, 0,
+                                  &beta,
+                                  d_PHT, n, m*n,
+                                  totaltracks);
+    cudaDeviceSynchronize();
+    if (cuA!=CUBLAS_STATUS_SUCCESS){
+        printf("sgemm error");
+    }
+    /*
+    float* PHT = (float*)malloc(sizeof(float)*n*m*totaltracks);
+    cudaMemcpy(PHT,d_PHT,sizeof(float)*n*m*totaltracks,cudaMemcpyDeviceToHost);
+    cudaError_t errorb = cudaGetLastError();
+    if (errorb != cudaSuccess){
+        printf("CUDA error: %s\n", cudaGetErrorString(errorb));
+    }
+    for (int i=0;i<totaltracks;i++){
+        printf("track %d :\n",i);
+        printmatrix_colmajor(PHT+i*m*n,m,n);
+    }
+    free(PHT);
+    */
+
+
+    //calculate H*PH^T, m*m
+    cuA = cublasSgemmStridedBatched(handle, CUBLAS_OP_N, CUBLAS_OP_N,
+                                  m, m, n,
+                                  &alpha,
+                                  d_H, m, 0,
+                                  d_PHT, n, n*m,
+                                  &beta,
+                                  d_S, m, m*m,
+                                  totaltracks);
+    cudaDeviceSynchronize();
+    if (cuA!=CUBLAS_STATUS_SUCCESS){
+        printf("sgemm error");
+    }
+    //calculate HPH^T+R, m*m
+    MMAdd1toMany<<<totaltracks,64,m*m*sizeof(float)>>>(d_S,d_R,m,m,totaltracks);
+    cudaDeviceSynchronize();
+    cudaError_t errora = cudaGetLastError();
+    if (errora != cudaSuccess){
+        printf("CUDA error: %s\n", cudaGetErrorString(errora));
+    }
+
+    cusolverDnHandle_t k_handle = NULL;
+    //cusolverStatus_t cusolver_status;
+
+    cusolverDnCreate(&k_handle);
+
+    //find out pointers to each matrix S and PHT for batch operations
+    float** d_each_d_PHT = trackerA->d_each_K;
+    float** d_each_d_S = trackerA->d_each_S;
+
+    //float* temp = (float*)malloc(sizeof(float)*1);
+    //cudaMemcpy(temp,d_S+1,sizeof(float)*1,cudaMemcpyDeviceToHost);
+    //printf("S found is %.3f\n",*temp);
+    //free(temp);
+    // info array for factorization operation
+    int* info = (int*)malloc(sizeof(int)*totaltracks);
+    int* d_info = trackerA->d_info;  
+
+    // Perform Cholesky Factorization in batch for each S to find L: S = L * L^T
+    // S = m*m
+    cusolverStatus_t cusolver_status = cusolverDnSpotrfBatched(k_handle,
+                            CUBLAS_FILL_MODE_LOWER,
+                            m,
+                            d_each_d_S,
+                            m,
+                            d_info, 
+                            totaltracks);
+    cudaDeviceSynchronize();
+    if (cusolver_status!=CUSOLVER_STATUS_SUCCESS){
+        printf("factorization error");
+    }
+    cudaMemcpy(info,d_info,sizeof(int)*totaltracks,cudaMemcpyDeviceToHost);
+    //check status of factorization
+    for(int i =0;i<totaltracks;i++){
+        if (info[i] != 0){
+            printf("factorization solver failed, at matrix %d with code %d\n", i,info[i]);
+            return;
+        }
+    }
+    free(info);
+    cusolverDnDestroy(k_handle);
+    
+    // Solve for K:  K * (L*L^T) = (PH^T)   /    KS = (PH^T)
+    // S is symmetric, tell solver to use lower half
+    // d_S contains L, m*m  PH^T = n*m
+
+    // run the first cublasStrsmBatched to solve for KL in batch, x * L^T = (PH^T)
+    cublasStrsmBatched(handle,
+                       CUBLAS_SIDE_RIGHT, CUBLAS_FILL_MODE_LOWER, CUBLAS_OP_T, CUBLAS_DIAG_NON_UNIT,
+                        n,m,
+                        &alpha,
+                        d_each_d_S,m,
+                        d_each_d_PHT,n,
+                        totaltracks);    
+    cudaDeviceSynchronize();
+
+    // run the second cublasStrsmBatched to solve for K in batch, K * L = x
+    cublasStrsmBatched(handle,
+                       CUBLAS_SIDE_RIGHT, CUBLAS_FILL_MODE_LOWER, CUBLAS_OP_N, CUBLAS_DIAG_NON_UNIT,
+                        n,m,
+                        &alpha,
+                        d_each_d_S,m,
+                        d_each_d_PHT,n,
+                        totaltracks);    
+    cudaDeviceSynchronize();
+    //d_PHT now contains kalman gain matrix n*m.
+
+    cublasDestroy(handle);
+
 
     }

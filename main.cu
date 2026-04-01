@@ -5,15 +5,6 @@
 #include "helper.h"
 #include "sort_lib.h"
 
-__device__ void printmatrix_colmajor_ondevice(float*input,int cols,int rows){
-    for(int i=0;i<rows;i++){
-		for(int j=0;j<cols;j++){
-				printf("%6.3f ",input[j*rows+i]);
-		}
-		printf("\n");
-	}
-}
-
 __global__ void trackertestinitialize(tracker* trackA){
     //fill in the track 0 and track N-1for testing
     *trackA->d_activetracks=2;
