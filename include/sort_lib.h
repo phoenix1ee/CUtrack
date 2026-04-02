@@ -7,8 +7,6 @@
 typedef struct tracker{
     int Max_Tracks;int Max_detection;   //N and M
     int m;int n;    
-    int activetracks; // number of active tracks 
-    int currentdetections; // number of detection get
 
     char* d_base; //base address for all device memory
 
@@ -24,9 +22,11 @@ typedef struct tracker{
     //     N*m*m     N*n*m       m*n        m*m
     float** d_each_K;float** d_each_S;int* d_info;    //buffer space for cublas and cusolver
     
+    float* d_IOU;        //buffer for IOU calculation, M*N
+    
     //constructor
     tracker(int MT=2000,int MD=2000, int measure=4, int state=7):
-        Max_Tracks(MT),Max_detection(MD), m(measure),n(state),activetracks(0), currentdetections(0){}
+        Max_Tracks(MT),Max_detection(MD), m(measure),n(state){}
 
     //allocate device memory for member matrix
     void allocateOnDevice(){
@@ -44,7 +44,8 @@ typedef struct tracker{
                         +sizeof(float)*n*m*Max_Tracks
                         +sizeof(float)*n*m
                         +sizeof(float)*m*m
-                        +sizeof(int)*Max_Tracks;
+                        +sizeof(int)*Max_Tracks
+                        +sizeof(float)*Max_Tracks*Max_detection;
 
         cudaMalloc((void**)&d_base,total);
         size_t offset = 0;
@@ -86,6 +87,10 @@ typedef struct tracker{
         offset+=sizeof(float)*m*m;             //m*m
 
         d_info=(int*)(d_base+offset);         //1*Max_Tracks
+        offset+=sizeof(float)*Max_Tracks;
+
+        d_IOU=(float*)(d_base+offset);         //Max_Detection*Max_Tracks
+
 
         //the array of pointers for cusolver/cublas
         cudaMalloc((void**)&d_each_K, sizeof(float*) * Max_Tracks);
@@ -120,7 +125,7 @@ __global__ void print_device_matrix_kernel(float*d_input,int cols,int rows);
 __global__ void MMAdd1toMany(float* batchedA, float* singleB, int row, int col, int batchCount);
 
 //wrapper function for IOU calculation
-void tracker_compute_IOU(tracker* tracker);
+void tracker_compute_IOU(tracker* tracker, float* d_detectbox, int activetrack, int activedetection, int image_w, int image_h);
 
 //wrapper function that calls GPU kernels / library for Kalman filter
 void cublasTranspose_simple(float* d_in, float* d_out, int o_row, int o_col);
