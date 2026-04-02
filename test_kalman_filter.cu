@@ -263,13 +263,6 @@ void test_tracker_kalman_gain(void){
     tracker* d_tracker;
     cudaMalloc(&d_tracker,sizeof(tracker));
     cudaMemcpy(d_tracker,&tracker1,sizeof(tracker),cudaMemcpyHostToDevice);
-    
-    KSaddrInitialize<<<(N+255)/256,256>>>(d_tracker);
-    cudaDeviceSynchronize();
-    cudaError_t errora = cudaGetLastError();
-    if (errora != cudaSuccess){
-        printf("CUDA error: %s\n", cudaGetErrorString(errora));
-    }
 
     //H P and R initialize for test
     float H[2]={1.0,0.0};
@@ -299,7 +292,7 @@ void test_tracker_kalman_gain(void){
 
     float* K=(float*)malloc(sizeof(float)*n*m*N);
     cudaMemcpy(K,tracker1.d_K,sizeof(float)*n*m*N,cudaMemcpyDeviceToHost);
-    errora = cudaGetLastError();
+    cudaError_t errora = cudaGetLastError();
     if (errora != cudaSuccess){
         printf("CUDA error: %s\n", cudaGetErrorString(errora));
     }
