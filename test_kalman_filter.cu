@@ -2,8 +2,8 @@
 #include <stdio.h>
 #include <cublas_v2.h>
 #include <cusolverDn.h>
-#include "helper.h"
-#include "sort_lib.h"
+#include "include/helper.h"
+#include "include/sort_lib.h"
 
 void test_kalman_gain_single(void){
     //test for kalman gain calculation function
@@ -250,6 +250,7 @@ void test_tracker_kalman_gain(void){
     //final K = {0.95238,0.23810}
     //set a max expected detection 2000
     
+    //set tracker variable
     int N=2000;
     int Max_detection = 2000;
     //set state variable and detection spec
