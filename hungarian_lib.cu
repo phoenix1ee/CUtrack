@@ -3,8 +3,8 @@
 #include <iostream>
 #include <cinttypes>
 #include <cuda_runtime.h>
-#include "helper.h"
-#include "sort_lib.h"
+#include "include/helper.h"
+#include "include/sort_lib.h"
 
 
 __global__ void colreduction(float *input, int matrixwidth, int matrixheight){

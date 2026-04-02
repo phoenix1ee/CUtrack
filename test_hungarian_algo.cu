@@ -1,10 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
-#include "helper.h"
+#include "include/helper.h"
 #include <cinttypes>
-#include "hungarian_cpu_vectorized.h"
-#include "sort_lib.h"
+#include "include/hungarian_cpu_vectorized.h"
+#include "include/sort_lib.h"
 
 __global__ void dummykernel(void){}
 

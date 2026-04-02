@@ -2,8 +2,8 @@
 #include <stdio.h>
 #include <cublas_v2.h>
 #include <cusolverDn.h>
-#include "helper.h"
-#include "sort_lib.h"
+#include "include/helper.h"
+#include "include/sort_lib.h"
 
 
 __global__ void MMAdd1toMany(float* batchedA, float* singleB, int row, int col, int batchCount){

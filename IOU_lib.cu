@@ -1,9 +1,10 @@
-#include "helper.h"
-#include "sort_lib.h"
+#include "include/helper.h"
+#include "include/sort_lib.h"
 
 __global__ void dummykernel(void){}
 
-__global__ void computeIOUmatrix(float* d_predictedstate, float* d_detectbox, float* d_IOUmatrix, int Ntracks, int Mdetection, int image_w, int image_h){
+__global__ void computeIOUmatrix(float* d_predictedstate, float* d_detectbox, float* d_IOUmatrix, 
+    int Ntracks, int Mdetection,int image_w, int image_h){
     //kernel to compute IOU cost matrix
     //d_predictedstate= [x, y, s, r, x., y., s.] 7 values * N tracks, all floats, column major
     //d_detectbox = [x_center, y_center, w width, h height] all floats, 4 values * M detections, column major
@@ -84,4 +85,13 @@ __global__ void computeIOUmatrix(float* d_predictedstate, float* d_detectbox, fl
             d_IOUmatrix[i*Mdetection+j]=1-IOU;
         }
     }
+}
+
+void tracker_compute_IOU(tracker* tracker, float* d_detectbox, int activetrack, int activedetection, int image_w, int image_h){
+    //wrapper function to compute IOU
+    dim3 dimBlock(32, 8, 1 );
+	dim3 dimGrid((activedetection*activetrack+255)/256, 1, 1 );
+    computeIOUmatrix<<<dimGrid,dimBlock>>>(tracker->d_state_predicted,d_detectbox,tracker->d_IOU,
+        activetrack,activedetection,image_w,image_h);
+    cudaDeviceSynchronize();
 }

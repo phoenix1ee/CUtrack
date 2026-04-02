@@ -1,10 +1,22 @@
 #include <stdlib.h>
 #include <stdio.h>
-#include "helper.h"
-#include "sort_lib.h"
+#include "include/helper.h"
+#include "include/sort_lib.h"
 
 int main(void){
+
+    //set tracker variable
+    int Max_track=2000;
+    int Max_detection = 2000;
+    //set state variable and detection spec
+    int m=4;     //detection
+    int n=7;     //state variable
+
+    tracker tracker1(Max_track,Max_detection,m,n);
+    tracker1.allocateOnDevice();
+
     int totaltrack = 16;
+    printf("No of tracks tested=%d\n",totaltrack);
     float*PS=(float*)malloc(sizeof(float)*totaltrack*7);
     for(int i=0;i<totaltrack;i++){
         PS[i*7]=rand()%100;
@@ -24,36 +36,30 @@ int main(void){
         db[i*4+3]=4;
     }
 
+    float*d_detectbox;
+    cudaMalloc((void**)&d_detectbox,sizeof(float)*totaldetection*4);
     float* IOU=(float*)malloc(sizeof(float)*totaltrack*totaldetection);
-    float * d_p;
-    float * d_d;
-    float * IOUM;
-    cudaMalloc((void**)&d_p,sizeof(float)*totaltrack*7);
-    cudaMalloc((void**)&d_d,sizeof(float)*totaldetection*4);
-    cudaMemcpy(d_p,PS,sizeof(float)*totaltrack*7,cudaMemcpyHostToDevice);
-    cudaMemcpy(d_d,db,sizeof(float)*totaldetection*4,cudaMemcpyHostToDevice);
-    cudaMalloc((void**)&IOUM,sizeof(float)*totaltrack*totaldetection);
+    cudaMemcpy(tracker1.d_state_predicted,PS,sizeof(float)*totaltrack*7,cudaMemcpyHostToDevice);
+    cudaMemcpy(d_detectbox,db,sizeof(float)*totaldetection*4,cudaMemcpyHostToDevice);
     dim3 dimBlock(32, 8, 1 );
 	dim3 dimGrid(1, 1, 1 );
 
     struct timespec start2;
 	getstarttime(&start2);
-    computeIOUmatrix<<<dimGrid,dimBlock>>>(d_p,d_d,IOUM,totaltrack,totaldetection,100,100);
+    tracker_compute_IOU(&tracker1,d_detectbox,totaltrack,totaldetection,100,100);
     uint64_t consumed2 = get_lapsed(start2);
 	printf("IOU kernel-used time: %" PRIu64 "\n",consumed2);
     cudaError_t errork = cudaGetLastError();
     if (errork != cudaSuccess){
         printf("ErrorP: %s\n", cudaGetErrorString(errork));
     }
-    cudaDeviceSynchronize();
-    cudaMemcpy(IOU,IOUM,sizeof(float)*totaltrack*totaldetection,cudaMemcpyDeviceToHost);
+    cudaMemcpy(IOU,tracker1.d_IOU,sizeof(float)*totaltrack*totaldetection,cudaMemcpyDeviceToHost);
     cudaError_t error = cudaGetLastError();
     if (error != cudaSuccess){
         printf("ErrorP: %s\n", cudaGetErrorString(error));
     }
-    cudaFree(d_d);
-    cudaFree(d_p);
-    cudaFree(IOUM);
+    tracker1.freeOnDevice();
+    cudaFree(d_detectbox);
     free(PS);
     free(db);
     printmatrix(IOU,totaldetection,totaltrack);
