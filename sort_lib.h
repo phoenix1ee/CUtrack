@@ -7,8 +7,10 @@
 typedef struct tracker{
     int Max_Tracks;int Max_detection;   //N and M
     int m;int n;    
+    int activetracks; // number of active tracks 
+    int currentdetections; // number of detection get
 
-    char* d_base; //base address for memory
+    char* d_base; //base address for all device memory
 
     int* d_track_id;    //track IDs   N
     float * d_state_predicted;    //state variables   n*N
@@ -17,16 +19,14 @@ typedef struct tracker{
     float* d_Pcov;       //state covariance matrix   n*n*N
     int* d_age;         //age of each tracks    N
     int* d_hit_streak;  //consecutive hit for each track   N
-    int* d_activetracks; // number of active tracks    1
     float* d_Z;         // measurement/dection buffer, m*M
-    int* d_currentdetections; // number of detection get    1
     float* d_S;float* d_K;float* d_H;float* d_R; //matrix for kalman gain
     //     N*m*m     N*n*m       m*n        m*m
     float** d_each_K;float** d_each_S;int* d_info;    //buffer space for cublas and cusolver
     
     //constructor
     tracker(int MT=2000,int MD=2000, int measure=4, int state=7):
-        Max_Tracks(MT),Max_detection(MD), m(measure),n(state) {}
+        Max_Tracks(MT),Max_detection(MD), m(measure),n(state),activetracks(0), currentdetections(0){}
 
     //allocate device memory for member matrix
     void allocateOnDevice(){
@@ -39,9 +39,7 @@ typedef struct tracker{
                         +sizeof(float)*Max_Tracks*n*n
                         +sizeof(int)*Max_Tracks
                         +sizeof(int)*Max_Tracks
-                        +sizeof(int)
                         +sizeof(float)*Max_detection*m
-                        +sizeof(int)
                         +sizeof(float)*m*m*Max_Tracks
                         +sizeof(float)*n*m*Max_Tracks
                         +sizeof(float)*n*m
@@ -72,14 +70,8 @@ typedef struct tracker{
         d_hit_streak=(int*)(d_base+offset);
         offset+=sizeof(int)*Max_Tracks;       //1*Max_Tracks
 
-        d_activetracks=(int*)(d_base+offset);
-        offset+=sizeof(int);                  //1
-
         d_Z=(float*)(d_base+offset);
         offset+=sizeof(float)*Max_detection*m; //Max_detection*m
-
-        d_currentdetections =(int*)(d_base+offset);
-        offset+=sizeof(int);                   //1
 
         d_S=(float*)(d_base+offset);
         offset+=sizeof(float)*m*m*Max_Tracks;  //m*m*Max_Tracks
@@ -95,8 +87,20 @@ typedef struct tracker{
 
         d_info=(int*)(d_base+offset);         //1*Max_Tracks
 
+        //the array of pointers for cusolver/cublas
         cudaMalloc((void**)&d_each_K, sizeof(float*) * Max_Tracks);
         cudaMalloc((void**)&d_each_S, sizeof(float*) * Max_Tracks);
+        float** h_each_K = (float**)malloc(sizeof(float*)*Max_Tracks);
+        float** h_each_S = (float**)malloc(sizeof(float*)*Max_Tracks);
+        for(int i=0;i<Max_Tracks;i++){
+            h_each_K[i]=d_K+i*n*m;
+            h_each_S[i]=d_S+i*m*m;
+        }
+        cudaMemcpy(d_each_K,h_each_K,sizeof(float*)*Max_Tracks,cudaMemcpyHostToDevice);
+        cudaMemcpy(d_each_S,h_each_S,sizeof(float*)*Max_Tracks,cudaMemcpyHostToDevice);
+        free(h_each_K);
+        free(h_each_S);
+
     }
     //free the device tracker object matrix
     void freeOnDevice(){
@@ -112,13 +116,11 @@ void print_device_matrix_colmajor_from_host(float*d_input,int cols,int rows);
 __global__ void print_device_matrix_kernel(float*d_input,int cols,int rows);
 
 //custom kernels
-//initialize the individual matrix array pointer
-__global__ void KSaddrInitialize(tracker *d_tracker);
 //matrix addition-1 to many-batch mode
 __global__ void MMAdd1toMany(float* batchedA, float* singleB, int row, int col, int batchCount);
 
-//IOU calculation
-__global__ void computeIOUmatrix(float* d_predictedstate, float* d_detectbox, float* d_IOUmatrix, int Ntracks, int Mdetection, int image_w, int image_h);
+//wrapper function for IOU calculation
+void tracker_compute_IOU(tracker* tracker);
 
 //wrapper function that calls GPU kernels / library for Kalman filter
 void cublasTranspose_simple(float* d_in, float* d_out, int o_row, int o_col);
