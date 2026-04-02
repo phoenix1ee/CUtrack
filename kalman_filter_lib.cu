@@ -5,10 +5,6 @@
 #include "helper.h"
 #include "sort_lib.h"
 
-__global__ void printS(float* d_S,float**d_S_0){
-    printf("I am here");
-    printf("d_S: %p d_each_S 0:%p\n",d_S,d_S_0[0]);
-}
 
 __global__ void MMAdd1toMany(float* batchedA, float* singleB, int row, int col, int batchCount){
     int blockid = (gridDim.x*blockIdx.y) + blockIdx.x;
@@ -30,19 +26,6 @@ __global__ void MMAdd1toMany(float* batchedA, float* singleB, int row, int col, 
     }
 }
 
-__global__ void KSaddrInitialize(tracker *d_tracker){
-    int blockid = (gridDim.x*blockIdx.y) + blockIdx.x;
-    int blocksize = blockDim.x*blockDim.y;
-	int gridsize = gridDim.x*gridDim.y;
-    int tid = threadIdx.y*blockDim.x+threadIdx.x;
-    int globalid=blockid*blocksize+tid;
-    for(int i=globalid;i<d_tracker->Max_Tracks;i+=gridsize*blocksize){
-        //printf("n: %d m: %d\n",d_tracker->n,d_tracker->m);
-        d_tracker->d_each_K[i]=d_tracker->d_K+i*d_tracker->n*d_tracker->m;
-        d_tracker->d_each_S[i]=d_tracker->d_S+i*d_tracker->m*d_tracker->m;
-        //printf("d_S %d: %p d_K %d: %p\n",i,d_tracker->d_each_S[i],i,d_tracker->d_each_K[i]);
-    }
-}
 
 __global__ void print_device_matrix_kernel(float*d_input,int cols,int rows){
     for(int i=0;i<rows;i++){
@@ -403,7 +386,7 @@ void kalman_gain_batch(bool*inactive, float* d_S, float*d_PHT, float*d_P,float*d
     }
 
 void tracker_kalman_gain(tracker* trackerA, int totaltracks){
-    
+    //for use with custom Struct Tracker
     float*d_S = trackerA->d_S;
 
     float*d_PHT=trackerA->d_K;
