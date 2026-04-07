@@ -70,7 +70,7 @@ project_root/
 
 1. Clone the repo
 2. Navigate to test folders with test_*, e.g. test_IOU
-3. Run make command
+3. Run make command and run the executable
 
 
 ### Instruction to Run:
