@@ -76,8 +76,23 @@ project_root/
 ### Instruction to Run:
 
 ```commandline
-#test the IOU function
+#test the image pre-process, under test_image_preprocess/
 >>make
+>>./preprocesstest.exe ./test_input.JPG
 
->>./testIOU
+#test the hungarian algorithm, under test_hungarian_algo/
+>>make
+>>./test_hungarian_algo.exe
+
+#test the IOU function, under test_IOU/
+>>make
+>>./testIOU.exe
+
+#test the Kalman filter, under test_kalman_filter/
+>>make
+>>./kalman_filter.exe, under project_root/
+
+#test the main
+>>make
+>>./main.exe
 ```
