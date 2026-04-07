@@ -1,17 +1,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
-#include "hungarian_cpu_vectorized.h"
-#include "helper.h"
-#include "sort_lib.h"
+#include "include/hungarian_cpu_vectorized.h"
+#include "include/helper.h"
+#include "include/sort_lib.h"
 
 __global__ void trackertestinitialize(tracker* trackA){
     //fill in the track 0 and track N-1for testing
-    *trackA->d_activetracks=2;
-    *trackA->d_currentdetections=2;
     trackA->d_track_id[0]=12345;
     for(int i=0;i<trackA->n;i++){
-        trackA->d_state[i]=0.9;
+        trackA->d_state_predicted[i]=0.9;
     }
 
     for(int i=0;i<trackA->n*trackA->n;i++){
@@ -43,7 +41,7 @@ __global__ void trackertestinitialize(tracker* trackA){
 
     trackA->d_track_id[trackA->Max_Tracks-1]=54321;
     for(int i=0;i<trackA->n;i++){
-        trackA->d_state[(trackA->Max_Tracks-1)*trackA->n+i]=0.99;
+        trackA->d_state_predicted[(trackA->Max_Tracks-1)*trackA->n+i]=0.99;
     }
     for(int i=0;i<trackA->n*trackA->n;i++){
         trackA->d_Pcov[(trackA->Max_Tracks-1)*trackA->n*trackA->n+i]=0.11;
@@ -68,15 +66,15 @@ __global__ void trackertestinitializeprint(tracker* trackA){
     //fill in the track 0 and track N-1for testing
     printf("track id 0: %d and last %d \n",trackA->d_track_id[0],trackA->d_track_id[trackA->Max_Tracks-1]);
     
-    printf("d_state 0:\n");
+    printf("d_state_predicted 0:\n");
     for(int i=0;i<trackA->n;i++){
-        printf("%.2f ",trackA->d_state[i]);
+        printf("%.2f ",trackA->d_state_predicted[i]);
     }
     printf("\n");
 
-    printf("d_state last:\n");
+    printf("d_state_predicted last:\n");
     for(int i=0;i<trackA->n;i++){
-        printf("%.2f ",trackA->d_state[(trackA->Max_Tracks-1)*trackA->n+i]);
+        printf("%.2f ",trackA->d_state_predicted[(trackA->Max_Tracks-1)*trackA->n+i]);
     }
     printf("\n");
 
@@ -91,8 +89,6 @@ __global__ void trackertestinitializeprint(tracker* trackA){
     printf("hit streak 0 %d\n",trackA->d_hit_streak[0]);
     printf("hit streak N %d\n",trackA->d_hit_streak[trackA->Max_Tracks-1]);
 
-    printf("no of active tracks %d \n",*trackA->d_activetracks);
-
     printf("d_Z 0:\n");
     for(int i=0;i<trackA->m;i++){
         printf("%.2f ",trackA->d_Z[i]);
@@ -104,8 +100,6 @@ __global__ void trackertestinitializeprint(tracker* trackA){
         printf("%.2f ",trackA->d_Z[(trackA->Max_detection-1)*trackA->m+i]);
     }
     printf("\n");
-
-    printf("no of current detection %d\n",*trackA->d_currentdetections);
 
     printf("d_S 0:\n");
     printmatrix_colmajor_ondevice(trackA->d_S,trackA->m,trackA->m);

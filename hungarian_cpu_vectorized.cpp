@@ -7,7 +7,7 @@
 #include <immintrin.h>
 #include <algorithm>
 #include <float.h>
-#include "hungarian_cpu_vectorized.h"
+#include "include/hungarian_cpu_vectorized.h"
 
 void row_min_subtraction_avx(float* data, int rows, int cols) {
     for (int i = 0; i < rows; ++i) {

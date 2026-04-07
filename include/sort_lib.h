@@ -127,8 +127,6 @@ __global__ void MMAdd1toMany(float* batchedA, float* singleB, int row, int col, 
 //wrapper function-image preprocess for onnx runtime
 #include <stdint.h>
 void frame_preprocess(uint8_t* d_frame_in,float* d_frame_out,int h_in, int w_in, int h_out, int w_out);
-void frame_BGRtoRGB(uint8_t* d_frame_in,int totalpixel);
-void frame_HWCtoCHW(uint8_t*d_input,uint8_t*d_output,int width, int height);
 
 //wrapper function for IOU calculation
 void tracker_compute_IOU(tracker* tracker, float* d_detectbox, int activetrack, int activedetection, int image_w, int image_h);

@@ -1,66 +1,6 @@
 #include "include/sort_lib.h"
 #include "include/helper.h"
 
-__global__ void HWCtranspose(uint8_t*a,uint8_t*b,int matrixwidth, int matrixheight){
-	//do transpose
-
-	//a tile of 32*32
-	__shared__ uint8_t sharedArray[32][33];
-	//each blocks process a tile
-	//loop thru each grid size
-	//(x,y) is the starting point of each block
-	for(int y=blockIdx.y*32;y<matrixheight;y+=32*gridDim.y){
-		for(int x=blockIdx.x*32;x<matrixwidth;x+=32*gridDim.x){
-				//do the processing
-				//read a tile of matrix to shared array with multiple iterations
-			for(int i = threadIdx.y;i<32;i+=blockDim.y){
-				int aY = y + i;
-            	int aX = x + threadIdx.x;
-				if(aY<matrixheight && aX<matrixwidth){
-					sharedArray[i][threadIdx.x]=a[aY*matrixwidth+aX];
-				}
-			}
-			__syncthreads();
-			//read a column of shared array and write to a row of output array
-			for(int j=threadIdx.y;j<32;j+=blockDim.y){
-				int bY = x + j;
-            	int bX = y + threadIdx.x;
-				if(bY<matrixwidth && bX<matrixheight){
-				b[bY*matrixheight+bX]=sharedArray[threadIdx.x][j];
-				}
-			}
-			//}
-			__syncthreads();
-		}
-	}
-	return;
-}
-
-
-__global__ void BGRconversionsimple(uint8_t* d_frame_in,int totalpixel){
-    //blocksize * 3 bytes of shared mem
-    //Convert BGR → RGB
-    int blocksize = blockDim.x*blockDim.y;
-    int gridsize = gridDim.x*gridDim.y;
-    int tid = threadIdx.y*blockDim.x+threadIdx.x;
-    int blockID=blockIdx.y*gridDim.x+blockIdx.x;
-    int offset=blockID*blocksize;
-    if (offset>totalpixel){return;}
-    //each thread handle 1 pixel
-    for(int i=offset;i<totalpixel;i+=gridsize*blocksize){
-        if(i+tid<totalpixel){
-            
-            uint8_t B=d_frame_in[i*3+tid*3];
-            uint8_t G=d_frame_in[i*3+tid*3+1];
-            uint8_t R=d_frame_in[i*3+tid*3+2];
-
-            d_frame_in[i*3+tid*3]=R;
-            d_frame_in[i*3+tid*3+1]=G;
-            d_frame_in[i*3+tid*3+2]=B;
-        }
-    }
-}
-
 __global__ void preprocess(uint8_t* d_frame_in,float* d_frame_out,
                         int h_in, int w_in, int out_h, int out_w,
                         int padx, int pady, float scale){
@@ -75,10 +15,12 @@ __global__ void preprocess(uint8_t* d_frame_in,float* d_frame_out,
 		for(int x=x_offset;x<out_w;x+=gridDim.x*blockDim.x){
             int pixel_x=x+threadIdx.x;
             int pixel_y=y+threadIdx.y;
+            int HW = out_w * out_h;
+            int pixel_id = pixel_y * out_w + pixel_x;
 
-            int pixelbyte_r= pixel_y*out_w+pixel_x;
-            int pixelbyte_b= out_w*out_h+pixel_y*out_w+pixel_x;
-            int pixelbyte_g= out_w*out_h*2+pixel_y*out_w+pixel_x;
+            int pixelbyte_r= pixel_id;
+            int pixelbyte_g= HW+pixel_id;
+            int pixelbyte_b= HW*2+pixel_id;
 
             if(pixel_x<padx || pixel_x>=out_w-padx || pixel_y<pady || pixel_y>=out_h-pady){
                 //in blank area
@@ -102,7 +44,6 @@ __global__ void preprocess(uint8_t* d_frame_in,float* d_frame_out,
                 float j = 1-i;
                 float s = y_in-y0;
                 float t = 1-s;
-
 
                 //read the bgr from frame
                 uchar3 x0y0 = make_uchar3(d_frame_in[(y0*w_in+x0)*3], 
@@ -155,29 +96,5 @@ void frame_preprocess(uint8_t* d_frame_in,float* d_frame_out,
     cudaError_t errora = cudaGetLastError();
     if (errora != cudaSuccess){
         printf("preprocess failed: %s\n", cudaGetErrorString(errora));
-    }
-}
-
-void frame_BGRtoRGB(uint8_t* d_frame_in,int totalpixel){
-    //wrapper function, convert a frame in BGR HWC to RGB HWC
-	dim3 dimBlock(32, 8, 1 );
-	dim3 dimGrid((totalpixel+255)/256, 1, 1 );
-    BGRconversionsimple<<<dimGrid,dimBlock>>>(d_frame_in,totalpixel);
-    cudaDeviceSynchronize();
-    cudaError_t errora = cudaGetLastError();
-    if (errora != cudaSuccess){
-        printf("BGR to RGB failed: %s\n", cudaGetErrorString(errora));
-    }
-}
-
-void frame_HWCtoCHW(uint8_t*d_input,uint8_t*d_output,int width, int height){
-    //wrapper function, convert a frame from HWC to CHW
-    dim3 dimBlock(32, 8, 1 );
-	dim3 dimGrid((width*height+255)/256, 1, 1 );
-    HWCtranspose<<<dimGrid,dimBlock>>>(d_input,d_output,width,height);
-    cudaDeviceSynchronize();
-    cudaError_t errora = cudaGetLastError();
-    if (errora != cudaSuccess){
-        printf("HWC to CHW failed: %s\n", cudaGetErrorString(errora));
     }
 }
