@@ -1,7 +1,7 @@
 #include "../include/sort_lib.h"
 #include "../include/helper.h"
 #define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
+#include "third_party/stb_image.h"
 
 #include <cstdint>
 #include <string>
@@ -201,7 +201,7 @@ void test_preprocess(struct ImageData image){
 int main(int argc, char** argv){
 	// read command line arguments
 	
-	if (argc != 2) {return 1;}
+	if (argc != 2) {std::cout<<"wrong argument\n";return 1;}
 
     std::string path = argv[1];
 
