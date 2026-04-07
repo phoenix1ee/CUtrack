@@ -63,6 +63,9 @@ project_root/
 3. Test of IOU computation
 
 4. Test of Kalman filter
+
+5. Testing of main, for tracker initialization only.
+
 ## How to download and run:
 
 1. Clone the repo
