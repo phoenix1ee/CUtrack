@@ -1,7 +1,7 @@
 #include "../include/sort_lib.h"
 #include "../include/helper.h"
 #define STB_IMAGE_IMPLEMENTATION
-#include "third_party/stb_image.h"
+#include "../include/third_party/stb_image.h"
 
 #include <cstdint>
 #include <string>
@@ -10,12 +10,12 @@
 
 #include <iostream>
 
-struct ImageData {
+typedef struct ImageData {
     uint8_t* data;   // BGR HWC buffer
     size_t size;     // total bytes
     int width;
     int height;
-};
+}ImageData;
 
 // Function to load a JPEG for testing the bgr_hwc_to_rgb_chw conversion
 // Caller must free with delete[]
@@ -145,7 +145,7 @@ bool compare_all(const float* cpu,const float* gpu,int size,float eps = 1e-5f) {
 
 __global__ void dummykernel(void){}
 
-void test_preprocess(struct ImageData image){
+void test_preprocess(ImageData image){
     printf("image preprocess test for onnx runtime:\n");
     printf("convert and resize BGR HWC to RGB CHW with normalized value for ONNX input format\n");
     printf("test image input size width:%d * height: %d\n",image.width,image.height);
@@ -205,7 +205,7 @@ int main(int argc, char** argv){
 
     std::string path = argv[1];
 
-    struct ImageData image = load_jpeg_bgr_hwc(path);
+    ImageData image = load_jpeg_bgr_hwc(path);
 
     test_preprocess(image);
 }
