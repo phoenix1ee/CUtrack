@@ -3,6 +3,8 @@
 
 #include <cuda_runtime.h>
 
+#include <string>
+
 //tracker struct wrapper
 typedef struct tracker{
     int Max_Tracks;int Max_detection;   //N and M
@@ -124,8 +126,12 @@ __global__ void print_device_matrix_kernel(float*d_input,int cols,int rows);
 //matrix addition-1 to many-batch mode
 __global__ void MMAdd1toMany(float* batchedA, float* singleB, int row, int col, int batchCount);
 
+//wrapper function for input of data
+struct ImageData load_jpeg_bgr_hwc_to_host(const std::string& path);
+struct ImageData load_jpeg_rgb_hwc_to_host(const std::string& path);
+void free_jpeg_from_host(ImageData image);
+
 //wrapper function-image preprocess for onnx runtime
-#include <stdint.h>
 void frame_preprocess(uint8_t* d_frame_in,float* d_frame_out,int h_in, int w_in, int h_out, int w_out);
 
 //wrapper function for IOU calculation

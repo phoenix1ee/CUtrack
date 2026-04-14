@@ -6,6 +6,13 @@
 #include <iostream>
 #include <cinttypes>
 
+typedef struct ImageData {
+    uint8_t* data;   // BGR HWC buffer
+    size_t size;     // total bytes
+    int width;
+    int height;
+}ImageData;
+
 //print matrix on device kernel
 __device__ inline void printmatrix_colmajor_ondevice(float*d_input,int cols,int rows){
     for(int i=0;i<rows;i++){
