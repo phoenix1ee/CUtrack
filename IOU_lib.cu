@@ -23,6 +23,11 @@ __global__ void computeIOUmatrix(float* d_predictedstate, float* d_detectbox, fl
     for(int i=threadoffset_i; i<Ntracks; i+=gridheight){
         for(int j=threadoffset_j; j<Mdetection; j+=gridwidth){
             //convert predicted state to predict box (x1, y1, x2, y2)
+            //pixel coordinates
+            //(x1,y1)-------(x2,y1)
+            //   |             |
+            //   |             |
+            //(x1,y2)-------(x2,y2)     
             float s_p = d_predictedstate[i*7+2];
             float w_p=sqrt(s_p*d_predictedstate[i*7+3]);
             float h_p=s_p/w_p;
