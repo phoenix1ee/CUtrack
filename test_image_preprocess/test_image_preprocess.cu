@@ -1,7 +1,5 @@
 #include "../include/sort_lib.h"
 #include "../include/helper.h"
-#define STB_IMAGE_IMPLEMENTATION
-#include "../include/third_party/stb_image.h"
 
 #include <cstdint>
 #include <string>
@@ -10,38 +8,7 @@
 
 #include <iostream>
 
-typedef struct ImageData {
-    uint8_t* data;   // BGR HWC buffer
-    size_t size;     // total bytes
-    int width;
-    int height;
-}ImageData;
 
-// Function to load a JPEG for testing the bgr_hwc_to_rgb_chw conversion
-// Caller must free with delete[]
-ImageData load_jpeg_bgr_hwc(const std::string& path) {
-    int w, h, channels;
-
-    // Force 3 channels (RGB)
-    uint8_t* rgb = stbi_load(path.c_str(), &w, &h, &channels, 3);
-    if (!rgb) {
-        throw std::runtime_error("Failed to load JPEG: " + path);
-    }
-
-    size_t size = static_cast<size_t>(w) * h * 3;
-    uint8_t* bgr = new uint8_t[size];
-
-    // Convert RGB → BGR (HWC layout preserved)
-    for (size_t i = 0; i < size; i += 3) {
-        bgr[i + 0] = rgb[i + 2]; // B
-        bgr[i + 1] = rgb[i + 1]; // G
-        bgr[i + 2] = rgb[i + 0]; // R
-    }
-
-    stbi_image_free(rgb);
-
-    return { bgr, size, w, h };
-}
 
 // CPU function to test the resize + bgr_hwc_to_rgb_chw + normalize
 void preprocess_cpu(
@@ -205,7 +172,7 @@ int main(int argc, char** argv){
 
     std::string path = argv[1];
 
-    ImageData image = load_jpeg_bgr_hwc(path);
+    ImageData image = load_jpeg_bgr_hwc_to_host(path);
 
     test_preprocess(image);
 }
