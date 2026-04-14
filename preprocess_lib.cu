@@ -81,7 +81,7 @@ __global__ void preprocess(uint8_t* d_frame_in,float* d_frame_out,
 
 void frame_preprocess(uint8_t* d_frame_in,float* d_frame_out,
                         int h_in, int w_in, int h_out, int w_out){
-    //wrapper function, given a frame in BGR HWC mode, resize frame to given size and 
+    //wrapper function, given a frame in BGR HWC mode on device, resize frame to given size and 
     //convert to RGB CHW with normalized RGB value
     float scale = min((float)h_out/(float)h_in,(float)w_out/(float)w_in);
     int re_height = floor(h_in*scale);
