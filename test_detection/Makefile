@@ -1,7 +1,7 @@
 ifeq ($(OS),Windows_NT)
     default: windows
-    INCLUDES = -I "C:/onnxruntime-win-x64-1.20.1/onnxruntime-win-x64-1.20.1/include"
-    LIBS     = -L "C:/onnxruntime-win-x64-1.20.1/onnxruntime-win-x64-1.20.1/lib" -l onnxruntime
+    INCLUDES = -I "C:/onnxruntime-win-x64-gpu-1.18.1/onnxruntime-win-x64-gpu-1.18.1/include"
+    LIBS     = -L "C:/onnxruntime-win-x64-gpu-1.18.1/onnxruntime-win-x64-gpu-1.18.1/lib" -l onnxruntime
 else
     default: linux
     # INCLUDES = -I /usr/local/onnxruntime/include
