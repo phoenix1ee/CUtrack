@@ -14,9 +14,9 @@ linux:
 	# nvcc -ccbin /usr/bin/gcc-11 test_IOU.cu ../IOU_lib.cu -o testIOU -lrt
 	# nvcc -ccbin /usr/bin/g++-11 test_IOU.cu ../IOU_lib.cu -o testIOU -lrt
 	# use above if using older cuda
-	nvcc $(INCLUDES) $(LIBS) test_detection.cu ../input_lib.cu ../preprocess_lib.cu -o test_detection -lrt
+	nvcc $(INCLUDES) $(LIBS) test_detection2.cu ../input_lib.cu ../preprocess_lib.cu -o test_detection2 -lrt
 	
 windows:
-	nvcc $(INCLUDES) $(LIBS) test_detection.cu ../input_lib.cu ../preprocess_lib.cu -o test_detection
+	nvcc -Xcompiler="/std:c++17" -std=c++17 $(INCLUDES) $(LIBS) test_detection2.cu ../input_lib.cu ../preprocess_lib.cu -o test_detection2 
 	del /Q *.exp *.lib
 	
