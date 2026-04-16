@@ -5,7 +5,7 @@ A fully CUDA accelerated implementation of Multi-objects tracking using SORT alg
 
 ## Algorithm Design
 This tracker combine several core ideas:
-1. Use YOLO as detector and keep flexibility to swap to other models, e.g. neural network/ML driven
+1. Use YOLO as detector for inference and keep flexibility to swap to other models, e.g. neural network/ML driven
 2. Use Hungarian Algorithm for matching
 3. Use a customised tracker object to allow runtime vector size declaration to support different state/measurement combination for compatibility with all scenarios other than object tracking in fixed frame, but also 2D/3D world, linearize/non-linearize robots kinematic models
 4. Use a 100% on device data pipeline to allow for maximum efficiency, parallelism and scalability
