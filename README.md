@@ -16,7 +16,7 @@ Major parts:
 1. Input stream/extract tensor (Pending)
 2. Frame Pre-processing (Done)
 3. Tracker initialization (Done)
-4. Detection with ONNX runtime and YOLO(Pending)
+4. Detection with ONNX runtime and YOLO(Done)
 5. State Estimation with Kalman filter (Pending)
 6. Computing IOU (Done)
 7. Matching of tracks and detection using Hungarian Algorithm (partially done)
@@ -27,9 +27,18 @@ Major parts:
 ```
 project_root/
 ├── include/                       # Public headers
+│   ├── third_party/               # folder of third party library
+|   |   └── stb_image.h            # library to handle jpeg file I/O for testing
+|   |                                from https://github.com/nothings/stb.git
 │   ├── helper.h                   # header of helper function
 │   ├── hungarian_cpu_vectorized.h # header of a AVX accelerated CPU function for benchmarking purpose
+│   ├── inference.h                # header of a wrapper class for ONNX runtime
 │   └── sort_lib.h                 # main header of all SORT related kernel wrapper functions
+├── test_detection/                # folder for test of using YOLO with onnx runtime for detection
+│   ├── test_detection.cu          # test file
+│   ├── test_detection2.cu         # test file with onnx wrapper class
+│   ├── test_input.JPG             # sample JPG for test
+│   └── Makefile                   #
 ├── test_hungarian_algo/           # folder for test of hungarian algorithm function
 │   ├── test_hungarian_algo.cu     # test file
 │   └── Makefile                   #
@@ -44,9 +53,13 @@ project_root/
 ├── test_kalman_filter/            # folder for test of kalman filter calculation
 │   ├── test_kalman_filter.cu      # test file
 │   └── Makefile                   #
+├── test_tracker/                  # folder for test of tracker class
+│   ├── test_tracker.cu            # test file
+│   └── Makefile                   #
 ├── ExportYOLOmodel.py             # python script to export YOLO model
 ├── hungarian_cpu_vectorized.cpp   # cpu vectorized function of row and column min reduction
 ├── hungarian_lib.cu               # library for hungarian algorithm
+├── input_lib.cu                   # library for handling input
 ├── IOU_lib.cu                     # library for IOU matrix calculation
 ├── kalman_filter_lib.cu           # library for Kalman filter
 ├── preprocess_lib.cu              # library for preprocessing
@@ -64,7 +77,7 @@ project_root/
 
 4. Test of Kalman filter
 
-5. Testing of main, for tracker initialization only.
+5. Test of ONNX runtime with YOLO model
 
 ## How to download and run:
 
@@ -92,7 +105,7 @@ project_root/
 >>make
 >>./kalman_filter.exe, under project_root/
 
-#test the main
+#test the ONNX runtime, under test_detection/
 >>make
->>./main.exe
+>>./test_detection2.exe .\test_input.JPG
 ```
