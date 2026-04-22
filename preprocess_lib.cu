@@ -98,3 +98,81 @@ void frame_preprocess(uint8_t* d_frame_in,float* d_frame_out,
         printf("preprocess failed: %s\n", cudaGetErrorString(errora));
     }
 }
+
+__device__ float detectionIOU(void){
+
+}
+
+__global__ void Reduce_bestclass(float* d_raw_detection, int Num_raw_detection, int height_raw_detection,
+                                float* d_filtered_detect, int* class_id, float threshold){
+    //kernel to find class id with best score
+    //each thread handle 1 detection and 80 classes
+
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int blocksize = blockDim.x*blockDim.y;
+    int totalthreads = blocksize*gridDim.x;
+
+    for(int i = idx;i<Num_raw_detection;i+=totalthreads){
+        if (idx >= Num_raw_detection) return;
+        int   best_class_id   = -1;
+        float best_score = 0.0f;
+
+        for (int c = 4; c < height_raw_detection; ++c) {
+            float score = d_raw_detection[c * Num_raw_detection + idx];
+            if (score > best_score) {
+                best_score = score;
+                best_class_id   = c - 4;   //0-79
+            }
+        }
+        //write best score at the 1st detection row
+        d_filtered_detect[idx]=d_raw_detection[idx];
+        d_filtered_detect[Num_raw_detection+idx]=d_raw_detection[Num_raw_detection+idx];
+        d_filtered_detect[2*Num_raw_detection+idx]=d_raw_detection[2*Num_raw_detection+idx];
+        d_filtered_detect[3*Num_raw_detection+idx]=d_raw_detection[3*Num_raw_detection+idx];
+        if (best_score>threshold){
+            d_filtered_detect[4*Num_raw_detection+idx]=best_score;
+            class_id[idx]=best_class_id;
+        }else{
+            d_filtered_detect[4*Num_raw_detection+idx]=0.0;
+            class_id[idx]=-1;
+        }
+    }
+}
+
+
+__global__ void Sort_by_confidence(float* d_filtered_detect, int Num_raw_detection,
+                                int* class_id, int class_count){
+    int tid = blockDim.x*threadIdx.y+threadIdx.x;
+    int blocksize = blockDim.x*blockDim.y;
+    //each block 1 class, eahc thread 1 detection col
+    __shared__ float max[256];
+    __shared__ int max_class_id[256];
+    
+    for(int c_id = blockIdx.x;c_id<class_count;c_id+=gridDim.x){
+        for(int i = tid;i<Num_raw_detection;i+=blocksize){
+            float score = (class_id[i]!=-1)?d_filtered_detect[4*Num_raw_detection+tid]:-INFINITY;
+            //find a maximum for each wrap
+            for (int offset = 16; offset > 0; offset /= 2) {
+                score = fmaxf(score, __shfl_down_sync(0xffffffff, score, offset));
+            }
+        }
+    }
+}
+
+int NMS(float* d_raw_detections, int* detection_shape, float* d_final_detections, int* class_id){
+    //wrapper function, given the output from models, filter and extract the detections for SORT
+    //model output tensor 1*84*8400, row major
+    //output to [5*M], each col, 4 coordinates value + 1 class id
+    int Num_raw_detection = detection_shape[2];  //number of detections 8400
+    int height_raw_detection = detection_shape[1];  //number of 0:3 coordinates, 4-83, score of each class
+
+    dim3 block(256,1,1);
+    dim3 grid(ceil((Num_raw_detection+255)/256),1,1);
+    Reduce_bestclass<<<grid,block,sizeof(int)*(height_raw_detection-4)>>>
+    (d_raw_detections,Num_raw_detection,height_raw_detection,d_final_detections,class_id,0.25);
+    cudaDeviceSynchronize();
+    cudaError_t errora = cudaGetLastError();
+    if (errora != cudaSuccess){
+        printf("detection extract failed: %s\n", cudaGetErrorString(errora));
+    }
+}
