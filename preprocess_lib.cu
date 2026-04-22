@@ -144,18 +144,41 @@ __global__ void Sort_by_confidence(float* d_filtered_detect, int Num_raw_detecti
                                 int* class_id, int class_count){
     int tid = blockDim.x*threadIdx.y+threadIdx.x;
     int blocksize = blockDim.x*blockDim.y;
+	int warpId = tid >> 5;
+    int lane   = tid & 31;
     //each block 1 class, eahc thread 1 detection col
-    __shared__ float max[256];
-    __shared__ int max_class_id[256];
-    
+    //num of detection/32 = shared mnem needed
+    __shared__ float max[384];
+    __shared__ int max_source[384];
     for(int c_id = blockIdx.x;c_id<class_count;c_id+=gridDim.x){
         for(int i = tid;i<Num_raw_detection;i+=blocksize){
-            float score = (class_id[i]!=-1)?d_filtered_detect[4*Num_raw_detection+tid]:-INFINITY;
-            //find a maximum for each wrap
-            for (int offset = 16; offset > 0; offset /= 2) {
-                score = fmaxf(score, __shfl_down_sync(0xffffffff, score, offset));
+            if(tid<384){
+                max[tid]=-INFINITY;
             }
+            warpId+=i>>5;
+            int source_tid = tid;
+            if(class_id[i]==c_id){
+                float score = d_filtered_detect[4*Num_raw_detection+i];
+            }else{
+                float score = -INFINITY;
+            }
+            //find a maximum for each wrap and record the source
+            for (int offset = 16; offset > 0; offset /= 2) {
+                other_score = __shfl_down_sync(0xffffffff, score, offset);
+                other_id = __shfl_down_sync(0xffffffff, source_tid, offset);
+                if(other_score>score){
+                    socre = other_score;
+                    source_tid = other_id;
+                }
+            }
+            //update to shared mem
+            if(lane==0){max[warpId]=score;max_source[warpId]=source_tid;}
         }
+        __syncthreads();
+        for(int i = tid;i<Num_raw_detection;i+=blocksize){
+            
+        }
+
     }
 }
 
