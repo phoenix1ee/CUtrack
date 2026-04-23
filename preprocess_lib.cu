@@ -1,5 +1,10 @@
 #include "include/sort_lib.h"
 #include "include/helper.h"
+#include <iostream>
+#include <thrust/device_vector.h>
+#include <thrust/sort.h>
+#include <thrust/iterator/permutation_iterator.h>
+#include <thrust/sequence.h>
 
 __global__ void preprocess(uint8_t* d_frame_in,float* d_frame_out,
                         int h_in, int w_in, int out_h, int out_w,
@@ -99,15 +104,97 @@ void frame_preprocess(uint8_t* d_frame_in,float* d_frame_out,
     }
 }
 
-__device__ float detectionIOU(void){
+__device__ float boxIOU(float acx,float acy,float aw,float ah,
+                        float bcx,float bcy,float bw,float bh){
+    //a/b->[cx,cy,w,h]
+    
+    float ax1=acx-aw/2;
+    float ax2=acx+aw/2;
+    float ay1=acy-ah/2;
+    float ay2=acy+ah/2;
 
+    float bx1=bcx-bw/2;
+    float bx2=bcx+bw/2;
+    float by1=bcy-bh/2;
+    float by2=bcy+bh/2;
+
+    float xx1 = fmaxf(ax1, bx1);
+    float yy1 = fmaxf(ay1, by1);
+    float xx2 = fminf(ax2, bx2);
+    float yy2 = fminf(ay2, by2);
+
+    float w = max(0.0f, xx2 - xx1);
+    float h = max(0.0f, yy2 - yy1);
+    float inter = w * h;
+
+    float area_a = aw*ah;
+    float area_b = bw*bh;
+
+    return inter / (area_a + area_b - inter + 1e-6f);
 }
 
-__global__ void Reduce_bestclass(float* d_raw_detection, int Num_raw_detection, int height_raw_detection,
-                                float* d_filtered_detect, int* class_id, float threshold){
+__global__ void NMS_refine(float* d_final_detection,float* d_buffer_detection, 
+                            int* d_final_class_id,
+                           int num_raw_detection,int num_class, float IOU_threshold, int* d_valid_count){
+    //find overlapped detection and suppresss, input is sorted with decending order in score
+    //each thread handle 1 detection
+    int blockid = blockIdx.y*gridDim.x+blockIdx.x;
+    int blocksize = blockDim.x*blockDim.y;
+    int totalthreads = gridDim.x*gridDim.y*blocksize;
+    int tid = blockid*blocksize+threadIdx.y*blockDim.x+threadIdx.x;
+    if (tid>num_raw_detection){return;}
+    int count=0;
+    for(int i = 0;i<num_raw_detection;i++){  //loop through all detections as subject
+        int subj_class = d_final_class_id[i];
+        if (subj_class==-1 && tid ==0){
+            d_buffer_detection[num_raw_detection*4+i]=-1;
+            continue;
+        } //only execute if subject class != -1
+        //update the subject detection score if class is valid
+        if(tid==0){
+            d_buffer_detection[num_raw_detection*4+i]=d_final_detection[num_raw_detection*4+i];
+            count++;
+        }
+        for(int j = tid+i+1;j<num_raw_detection;j+=totalthreads){
+            int current_class = d_final_class_id[j];
+            if(current_class==-1){
+                d_buffer_detection[num_raw_detection*4+j]=-1.0;
+            }else if(current_class!=subj_class){
+                continue;
+            }else{
+                //only execute if compare class = subj_class
+                float acx = d_final_detection[i];
+                float acy = d_final_detection[num_raw_detection+i];
+                float aw = d_final_detection[num_raw_detection*2+i];
+                float ah = d_final_detection[num_raw_detection*3+i];
+                float bcx = d_final_detection[j];
+                float bcy = d_final_detection[num_raw_detection+j];
+                float bw = d_final_detection[num_raw_detection*2+j];
+                float bh = d_final_detection[num_raw_detection*3+j];
+
+                float IOU = boxIOU(acx,acy,aw,ah,bcx,bcy,bw,bh);
+                if (IOU>IOU_threshold){
+                    //use the buffer as staging for result
+                    //suppress by setting score = -1 and class = -1
+                    d_buffer_detection[num_raw_detection*4+j]=-1.0;
+                    d_final_detection[num_raw_detection*4+j]=-1.0;
+                    d_final_class_id[j]=-1;
+                }else{
+                    d_buffer_detection[num_raw_detection*4+j]=d_final_detection[num_raw_detection*4+j];
+                }
+            }
+        }
+        __syncthreads();
+    }
+}
+
+
+__global__ void Reduce_bestclass(float* d_raw_detection, float* d_filter_detection,
+                                int Num_raw_detection, int height_raw_detection,
+                                 int* d_raw_class_id, float threshold){
     //kernel to find class id with best score
     //each thread handle 1 detection and 80 classes
-
+    //d_raw_detection is 84*8400, d_filtered_detect is 5*8400, class_id is 1*8400
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int blocksize = blockDim.x*blockDim.y;
     int totalthreads = blocksize*gridDim.x;
@@ -124,78 +211,104 @@ __global__ void Reduce_bestclass(float* d_raw_detection, int Num_raw_detection, 
                 best_class_id   = c - 4;   //0-79
             }
         }
-        //write best score at the 1st detection row
-        d_filtered_detect[idx]=d_raw_detection[idx];
-        d_filtered_detect[Num_raw_detection+idx]=d_raw_detection[Num_raw_detection+idx];
-        d_filtered_detect[2*Num_raw_detection+idx]=d_raw_detection[2*Num_raw_detection+idx];
-        d_filtered_detect[3*Num_raw_detection+idx]=d_raw_detection[3*Num_raw_detection+idx];
+        //write best score to raw detection row 4
         if (best_score>threshold){
-            d_filtered_detect[4*Num_raw_detection+idx]=best_score;
-            class_id[idx]=best_class_id;
+            d_filter_detection[4*Num_raw_detection+idx]=best_score;
+            d_raw_class_id[idx]=best_class_id;
         }else{
-            d_filtered_detect[4*Num_raw_detection+idx]=0.0;
-            class_id[idx]=-1;
+            d_filter_detection[4*Num_raw_detection+idx]=-1.0;
+            d_raw_class_id[idx]=-1;
         }
     }
 }
 
+__global__ void update_after_sort(float* d_detection_in, float* d_detection_out, int* d_class_in, int* d_class_out,
+                                    int* order, int width, int num_rows) {
+    //copy the coordinates to output
+    // global ID
+    int global_tid = (blockIdx.y * gridDim.x + blockIdx.x) * (blockDim.x * blockDim.y) 
+                     + (threadIdx.y * blockDim.x + threadIdx.x);
+    int grid_stride = gridDim.x * gridDim.y * blockDim.x * blockDim.y;
 
-__global__ void Sort_by_confidence(float* d_filtered_detect, int Num_raw_detection,
-                                int* class_id, int class_count){
-    int tid = blockDim.x*threadIdx.y+threadIdx.x;
-    int blocksize = blockDim.x*blockDim.y;
-	int warpId = tid >> 5;
-    int lane   = tid & 31;
-    //each block 1 class, eahc thread 1 detection col
-    //num of detection/32 = shared mnem needed
-    __shared__ float max[384];
-    __shared__ int max_source[384];
-    for(int c_id = blockIdx.x;c_id<class_count;c_id+=gridDim.x){
-        for(int i = tid;i<Num_raw_detection;i+=blocksize){
-            if(tid<384){
-                max[tid]=-INFINITY;
-            }
-            warpId+=i>>5;
-            int source_tid = tid;
-            if(class_id[i]==c_id){
-                float score = d_filtered_detect[4*Num_raw_detection+i];
-            }else{
-                float score = -INFINITY;
-            }
-            //find a maximum for each wrap and record the source
-            for (int offset = 16; offset > 0; offset /= 2) {
-                other_score = __shfl_down_sync(0xffffffff, score, offset);
-                other_id = __shfl_down_sync(0xffffffff, source_tid, offset);
-                if(other_score>score){
-                    socre = other_score;
-                    source_tid = other_id;
-                }
-            }
-            //update to shared mem
-            if(lane==0){max[warpId]=score;max_source[warpId]=source_tid;}
+    // Loop over columns
+    for (int col = global_tid; col < width; col += grid_stride) {
+        // Use the sorted index found by Thrust
+        int source_col = order[col]; 
+        // Loop every row for a column
+        for (int row = 0; row < num_rows; row++) {
+            int in_idx  = (row * width) + source_col;
+            int out_idx = (row * width) + col;
+            //update
+            d_detection_out[out_idx] = d_detection_in[in_idx];
         }
-        __syncthreads();
-        for(int i = tid;i<Num_raw_detection;i+=blocksize){
-            
-        }
-
+        //update class id to final
+        d_class_out[col]=d_class_in[source_col];
     }
 }
 
-int NMS(float* d_raw_detections, int* detection_shape, float* d_final_detections, int* class_id){
+
+void NMS(float* d_raw_detections, int* d_raw_class_id, int Num_raw_detection, int height_raw_detection, 
+        float* d_buffer_detections, int* d_buffer_class_id, int*d_detection_count){
     //wrapper function, given the output from models, filter and extract the detections for SORT
     //model output tensor 1*84*8400, row major
-    //output to [5*M], each col, 4 coordinates value + 1 class id
-    int Num_raw_detection = detection_shape[2];  //number of detections 8400
-    int height_raw_detection = detection_shape[1];  //number of 0:3 coordinates, 4-83, score of each class
+    //output to the same raw detection array at row 0-4, each col, 4 coordinates value + 1 score
 
+//find best class
     dim3 block(256,1,1);
-    dim3 grid(ceil((Num_raw_detection+255)/256),1,1);
-    Reduce_bestclass<<<grid,block,sizeof(int)*(height_raw_detection-4)>>>
-    (d_raw_detections,Num_raw_detection,height_raw_detection,d_final_detections,class_id,0.25);
+    dim3 grid((Num_raw_detection+255)/256,1,1);
+    Reduce_bestclass<<<grid,block>>>(d_raw_detections,d_buffer_detections,Num_raw_detection,height_raw_detection,d_raw_class_id,0.25);
     cudaDeviceSynchronize();
     cudaError_t errora = cudaGetLastError();
     if (errora != cudaSuccess){
-        printf("detection extract failed: %s\n", cudaGetErrorString(errora));
+        printf("best class kernel failed: %s\n", cudaGetErrorString(errora));
+    }
+
+//sort using thrust
+    // Initialize indices: [0, 1, 2, 3]
+    thrust::device_vector<int> col_indices(Num_raw_detection);
+    thrust::sequence(col_indices.begin(), col_indices.end());
+    // Get a pointer to the start of the specific row acting as the key
+    thrust::device_ptr<float> thrust_d_buffer_detection(d_buffer_detections);
+    auto key_row_begin = thrust_d_buffer_detection + (4 * Num_raw_detection);
+    thrust::sort_by_key(key_row_begin, key_row_begin + Num_raw_detection, col_indices.begin(),thrust::greater<float>());
+    cudaDeviceSynchronize();
+    //get raw pointer of results
+    int* order = thrust::raw_pointer_cast(col_indices.data());
+    //copy the coordinates and class to final detection under descending order of score
+    update_after_sort<<<grid,block>>>(d_raw_detections,d_buffer_detections,
+                                      d_raw_class_id,d_buffer_class_id,order,
+                                      Num_raw_detection,4);
+    cudaDeviceSynchronize();
+    errora = cudaGetLastError();
+    if (errora != cudaSuccess){
+        printf("final detection update kernel failed: %s\n", cudaGetErrorString(errora));
+    }
+//suppress duplicate with detection IOU
+    //use the raw array as buffer
+    NMS_refine<<<grid,block>>>(d_buffer_detections,d_raw_detections,
+                                d_buffer_class_id,
+                                Num_raw_detection,height_raw_detection-4,0.4,d_detection_count);
+    cudaDeviceSynchronize();
+    errora = cudaGetLastError();
+    if (errora != cudaSuccess){
+        printf("suppression of final detection kernel failed: %s\n", cudaGetErrorString(errora));
+    }
+
+//re-sort and count number of output
+    // re-Initialize indices of last thrust
+    thrust::sequence(col_indices.begin(), col_indices.end());
+    // Get a pointer to the start of the specific row acting as the key
+    thrust::device_ptr<float> thrust_d_suppressed_detection(d_raw_detections);
+    key_row_begin = thrust_d_suppressed_detection + (4 * Num_raw_detection);
+    thrust::sort_by_key(key_row_begin, key_row_begin + Num_raw_detection, col_indices.begin(),thrust::greater<float>());
+    cudaDeviceSynchronize();
+    //copy the coordinates and class back to raw detection under descending order of score
+    update_after_sort<<<grid,block>>>(d_buffer_detections,d_raw_detections,
+                                      d_buffer_class_id,d_raw_class_id,order,
+                                      Num_raw_detection,4);
+    cudaDeviceSynchronize();
+    errora = cudaGetLastError();
+    if (errora != cudaSuccess){
+        printf("final detection update kernel failed: %s\n", cudaGetErrorString(errora));
     }
 }
