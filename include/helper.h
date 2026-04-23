@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <fstream>
 #include <iostream>
 #include <cinttypes>
 
@@ -64,6 +65,56 @@ inline void printmatrix_colmajor(float*input,int cols,int rows){
 		}
 		printf("\n");
 	}
+}
+
+inline void write2DArrayToFile(const float* data, int rows, int cols, const char* filename)
+{
+    std::ofstream file(filename);
+
+    if (!file.is_open())
+    {
+        std::cerr << "Error: Could not open file " << filename << std::endl;
+        return;
+    }
+
+    for (int i = 0; i < rows; ++i)
+    {
+        for (int j = 0; j < cols; ++j)
+        {
+            file << data[i * cols + j];
+
+            if (j < cols - 1)
+                file << ",";  // comma-separated
+        }
+        file << "\n"; // new row
+    }
+
+    file.close();
+}
+
+inline void write2DArrayToFileInt(const int* data, int rows, int cols, const char* filename)
+{
+    std::ofstream file(filename);
+
+    if (!file.is_open())
+    {
+        std::cerr << "Error: Could not open file " << filename << std::endl;
+        return;
+    }
+
+    for (int i = 0; i < rows; ++i)
+    {
+        for (int j = 0; j < cols; ++j)
+        {
+            file << data[i * cols + j];
+
+            if (j < cols - 1)
+                file << ",";  // comma-separated
+        }
+        file << "\n"; // new row
+    }
+
+    file.close();
 }
 
 #include <cuda_runtime.h>
