@@ -138,6 +138,7 @@ public:
             output_shapes[0].data(), output_shapes[0].size());
     }
     void bind_tensors(void){
+        // Bind input and output tensor to session
         io_binding = Ort::IoBinding(session);
         io_binding.BindInput(input_names[0], input_tensor);
         io_binding.BindOutput(output_names[0], output_tensor);
