@@ -134,6 +134,10 @@ void free_jpeg_from_host(ImageData image);
 //wrapper function-image preprocess for onnx runtime
 void frame_preprocess(uint8_t* d_frame_in,float* d_frame_out,int h_in, int w_in, int h_out, int w_out);
 
+//wrapper function-post processing after detections
+void NMS(float* d_raw_detections, int* d_raw_class_id, int Num_raw_detection, int height_raw_detection, 
+        float* d_buffer_detections, int* d_buffer_class_id, int*d_detection_count);
+
 //wrapper function for IOU calculation
 void tracker_compute_IOU(tracker* tracker, float* d_detectbox, int activetrack, int activedetection, int image_w, int image_h);
 
