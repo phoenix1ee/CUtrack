@@ -186,6 +186,7 @@ __global__ void NMS_refine(float* d_final_detection,float* d_buffer_detection,
         }
         __syncthreads();
     }
+    if(tid==0){d_valid_count[0]=count;}
 }
 
 
@@ -249,9 +250,10 @@ __global__ void update_after_sort(float* d_detection_in, float* d_detection_out,
 
 void NMS(float* d_raw_detections, int* d_raw_class_id, int Num_raw_detection, int height_raw_detection, 
         float* d_buffer_detections, int* d_buffer_class_id, int*d_detection_count){
-    //wrapper function, given the output from models, filter and extract the detections for SORT
-    //model output tensor 1*84*8400, row major
-    //output to the same raw detection array at row 0-4, each col, 4 coordinates value + 1 score
+    //wrapper function to handle NMS of raw detection from YOLO
+    //given the output from models, filter and extract the detections for SORT
+    //input: model output tensor 1*84*8400, row major
+    //output: the input raw detection array at 5*8400, row 0-4, each col: 4 coordinates value + 1 score
 
 //find best class
     dim3 block(256,1,1);
