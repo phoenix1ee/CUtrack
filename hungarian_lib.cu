@@ -1,3 +1,13 @@
+/**
+ * @file hungarian_lib.cu
+ * @author SF Lee
+ * @date 2026-04-07
+ * @brief GPU-accelerated implementation of the Hungarian algorithm.
+ *
+ * This file contains CUDA kernels and wrapper functions
+ * used to compute optimal assignments using the Hungarian method.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
@@ -686,4 +696,12 @@ void reductionNotranspose(float* input, int totalsize, int blocksize, int width,
 	cudaDeviceSynchronize();
 	cudaFree(d_input);
 	
+}
+
+void transposeArray(float *d_a,float *d_b,int matrixwidth, int matrixheight){
+	//define grid and block size
+	dim3 dimBlock(32, 8, 1 );
+	dim3 dimGrid((matrixheight*matrixwidth+255)/256, 1, 1 );
+	transpose<<<dimGrid,dimBlock>>>(d_a,d_b,matrixwidth,matrixheight);
+	cudaDeviceSynchronize();
 }
