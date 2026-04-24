@@ -1,12 +1,22 @@
 ifeq ($(OS),Windows_NT)
     default: windows
+    INCLUDES = -I "C:/onnxruntime-win-x64-gpu-1.18.1/onnxruntime-win-x64-gpu-1.18.1/include"
+    LIBS     = -L "C:/onnxruntime-win-x64-gpu-1.18.1/onnxruntime-win-x64-gpu-1.18.1/lib" -l onnxruntime
 else
     default: linux
+    # INCLUDES = -I /usr/local/onnxruntime/include
+    # LIBS     = -L /usr/local/onnxruntime/lib -l onnxruntime
 endif
 
+
+
 linux:
-	# use -ccbin /usr/bin/gcc-11 for myself
-	nvcc -ccbin /usr/bin/g++-11 main.cu -o main -lrt
+	# nvcc -ccbin /usr/bin/gcc-11 test_IOU.cu ../IOU_lib.cu -o testIOU -lrt
+	# nvcc -ccbin /usr/bin/g++-11 test_IOU.cu ../IOU_lib.cu -o testIOU -lrt
+	# use above if using older cuda
+	nvcc $(INCLUDES) $(LIBS) main.cu input_lib.cu preprocess_lib.cu tracker_update_lib.cu hungarian_lib.cu -o main -lrt
+	
 windows:
-	nvcc main.cu -o main
+	nvcc -Xcompiler="/std:c++17" -std=c++17 $(INCLUDES) $(LIBS) main.cu input_lib.cu preprocess_lib.cu tracker_update_lib.cu hungarian_lib.cu -o main 
 	del /Q *.exp *.lib
+	
