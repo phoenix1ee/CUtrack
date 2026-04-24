@@ -24,7 +24,7 @@ typedef struct tracker{
     //     N*m*m     N*n*m       m*n        m*m
     float** d_each_K;float** d_each_S;int* d_info;    //buffer space for cublas and cusolver
     
-    float* d_IOU;        //buffer for IOU calculation, M*N
+    float* d_IOU;        //buffer for IOU calculation, N*M
     
     //constructor
     tracker(int MT=2000,int MD=2000, int measure=4, int state=7):
@@ -131,12 +131,19 @@ struct ImageData load_jpeg_bgr_hwc_to_host(const std::string& path);
 struct ImageData load_jpeg_rgb_hwc_to_host(const std::string& path);
 void free_jpeg_from_host(ImageData image);
 
-//wrapper function-image preprocess for onnx runtime
+//wrapper function and helper function-image processing for onnx runtime
+__device__ float boxIOU(float acx,float acy,float aw,float ah,
+                        float bcx,float bcy,float bw,float bh);
 void frame_preprocess(uint8_t* d_frame_in,float* d_frame_out,int h_in, int w_in, int h_out, int w_out);
 
 //wrapper function-post processing after detections
 void NMS(float* d_raw_detections, int* d_raw_class_id, int Num_raw_detection, int height_raw_detection, 
         float* d_buffer_detections, int* d_buffer_class_id, int*d_detection_count);
+
+//wrapper function for state udate
+void set_first_state(tracker &tracker, int num_current_tracks, int num_added_tracks);
+void set_first_Pcov(tracker &tracker, int current_tracks, int num_added_tracks);
+void set_single_F(tracker &tracker);
 
 //wrapper function for IOU calculation
 void tracker_compute_IOU(tracker* tracker, float* d_detectbox, int activetrack, int activedetection, int image_w, int image_h);
@@ -151,6 +158,7 @@ void kalman_gain_batch(bool*inactive, float* d_S, float*d_PHT, float*d_P,float*d
 void tracker_kalman_gain(tracker* trackerA, int totaltracks);
 
 //wrapper function that calls the GPU kernel for hungarian algorithm(different design)
+void transposeArray(float *d_a,float *d_b,int matrixwidth, int matrixheight);
 void reductionStreamMemory(float* input, int totalsize, int blocksize, int width, int height);
 void reductionmappedmem(float* input, int totalsize, int blocksize, int width, int height);
 void reductionglobalmem(float* input, int totalsize, int blocksize, int width, int height);
