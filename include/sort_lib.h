@@ -16,6 +16,7 @@ typedef struct tracker{
     float * d_state_predicted;    //state variables   n*N
     float * d_state_updated;    //state variables   n*N
     float * d_F;                  //transition matrix n*n
+    float * d_Q;            //process noise   n*n  
     float* d_Pcov;       //state covariance matrix   n*n*N
     int* d_age;         //age of each tracks    N
     int* d_hit_streak;  //consecutive hit for each track   N
@@ -37,6 +38,7 @@ typedef struct tracker{
         size_t total = sizeof(int)*Max_Tracks
                         +sizeof(float)*Max_Tracks*n
                         +sizeof(float)*Max_Tracks*n
+                        +sizeof(float)*n*n
                         +sizeof(float)*n*n
                         +sizeof(float)*Max_Tracks*n*n
                         +sizeof(int)*Max_Tracks
@@ -62,6 +64,9 @@ typedef struct tracker{
         offset+=sizeof(float)*Max_Tracks*n;   //n*Max_Tracks        
 
         d_F=(float*)(d_base+offset);
+        offset+=sizeof(float)*n*n;            //n*n        
+
+        d_Q=(float*)(d_base+offset);
         offset+=sizeof(float)*n*n;            //n*n        
 
         d_Pcov=(float*)(d_base+offset);
@@ -139,11 +144,16 @@ void frame_preprocess(uint8_t* d_frame_in,float* d_frame_out,int h_in, int w_in,
 //wrapper function-post processing after detections
 void NMS(float* d_raw_detections, int* d_raw_class_id, int Num_raw_detection, int height_raw_detection, 
         float* d_buffer_detections, int* d_buffer_class_id, int*d_detection_count);
+void copyToTracker(float* d_detector_output, float* d_Z,int Num_raw_detection,int detection_count);
 
 //wrapper function for state udate
 void set_first_state(tracker &tracker, int num_current_tracks, int num_added_tracks);
 void set_first_Pcov(tracker &tracker, int current_tracks, int num_added_tracks);
 void set_single_F(tracker &tracker);
+void set_single_R(tracker &tracker);
+void set_single_Q(tracker &tracker);
+void set_single_H(tracker &tracker);
+void make_prediction(tracker &tracker, int num_current_tracks);
 
 //wrapper function for IOU calculation
 void tracker_compute_IOU(tracker* tracker, float* d_detectbox, int activetrack, int activedetection, int image_w, int image_h);
