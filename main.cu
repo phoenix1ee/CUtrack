@@ -34,7 +34,9 @@ try {
     int* d_detection_count;
     cudaMalloc((void**)&d_detection_count,sizeof(int));
     set_single_F(tracker1);
-    
+    set_single_Q(tracker1);
+    set_single_R(tracker1);
+    set_single_H(tracker1);
 
     //setup input stream
     std::string path = argv[1];
@@ -91,18 +93,37 @@ try {
     // copy/transpose the detection to tracker's measurement matrix
     //transposeArray(d_detector_output,d_detection_buffer,Num_raw_detection,5);
     //
-    cudaMemcpy(tracker1.d_Z,d_detector_output,sizeof(float)*5*Num_raw_detection,cudaMemcpyDeviceToDevice);
+    //cudaMemcpy(tracker1.d_Z,d_detector_output,sizeof(float)*tracker1.m*Num_raw_detection,cudaMemcpyDeviceToDevice);
+    copyToTracker(d_detector_output,tracker1.d_Z,Num_raw_detection,detection_count[0]);
     //calculate states
     if (first_frame){
         // add the new initial state
         set_first_state(tracker1,0,detection_count[0]);
         set_first_Pcov(tracker1,0,detection_count[0]);
+        trackcount = detection_count[0];
         first_frame = !first_frame;
-    }else{
+        make_prediction(tracker1,trackcount);
+    }else{  //for each frame after 1st frame
+        //prediction
+        make_prediction(tracker1,trackcount);
+        //compute IOU and cost matrixbetween predicted box and detection
 
+        //hungarian assignment
+
+        //update using kalman gain
+
+        //Handle unmatched tracks
+
+        //Create new tracks for unmatched detections
+
+        //Output confirmed tracks
     }
 
-    //writeDevice2DArrayToFile(tracker1.d_Z,5,tracker1.Max_detection,"detections.txt");
+    //writeDevice2DArrayToFile(tracker1.d_F,tracker1.n,tracker1.n,"dF.txt");
+    //writeDevice2DArrayToFile(tracker1.d_Q,tracker1.n,tracker1.n,"dQ.txt");
+    //writeDevice2DArrayToFile(tracker1.d_R,tracker1.m,tracker1.m,"dR.txt");
+    //writeDevice2DArrayToFile(tracker1.d_H,tracker1.n,tracker1.m,"dH.txt");
+    writeDevice2DArrayToFile(tracker1.d_state_predicted,tracker1.n,tracker1.Max_Tracks,"d_prediction.txt");
 
     //writeDevice2DArrayToFile(tracker1.d_state_updated,tracker1.n,tracker1.Max_Tracks,"stateTest.txt");
 
