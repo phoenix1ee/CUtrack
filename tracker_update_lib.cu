@@ -62,6 +62,37 @@ __global__ void set_first_pcov_kernel(float* dest, int N, int start_matrix_ID, i
     }
 }
 
+__global__ void predict(float*d_state_updated, float* state_predicted, int num_tracks, int N, int n){
+    //make prediction based on detection at d_Z
+    //assume start at track 0, for number of current tracks
+    //1 thread for 1 tracks
+    //X_p =    F  *   X_updated
+    //7*N    7*7     7*N
+    //all matrix are row major order stored
+    //F is simple, so avoid direct matrix multiplication
+    int totalthreads = gridDim.x*blockDim.x;
+    int tid = blockIdx.x*blockDim.x+threadIdx.x;
+    if(tid>num_tracks){return;}
+    for(int i = tid;i<num_tracks;i+=totalthreads){
+        if(i>N){return;}
+        float x = d_state_updated[i];
+        float y = d_state_updated[i+1*N];
+        float s = d_state_updated[i+2*N];
+        float r = d_state_updated[i+3*N];
+        float x_dot = d_state_updated[i+4*N];
+        float y_dot = d_state_updated[i+5*N];
+        float s_dot = d_state_updated[i+6*N];
+        
+        state_predicted[tid]=x+x_dot;   //cx
+        state_predicted[tid]=y+y_dot;   //cy
+        state_predicted[tid]=s+s_dot;   //s
+        state_predicted[tid]=r;   //r
+        state_predicted[tid]=x_dot;   //x.
+        state_predicted[tid]=y_dot;   //y.
+        state_predicted[tid]=s_dot;   //s.        
+    }
+}
+
 void set_first_state(tracker &tracker, int num_current_tracks, int num_added_tracks){
     //wrapper function to set the states for first time added detections
     //check tracker's d_Z array and update to states updated
@@ -96,6 +127,7 @@ void set_first_Pcov(tracker &tracker, int current_tracks, int num_added_tracks){
 void set_single_F(tracker &tracker){
     //wrapper function to set the F matrix
     //use constant velocity model
+    //row major storage
     //1	0	0	0	1	0	0
     //0	1	0	0	0	1	0
     //0	0	1	0	0	0	1
@@ -112,12 +144,75 @@ void set_single_F(tracker &tracker){
     free(F);
 }
 
-void set_single_R(tracker &tracker){
-
-}
 void set_single_Q(tracker &tracker){
-
+    //wrapper function to set the Q matrix
+    //n*n
+    //0.01	0	0	0	1	0	0
+    //0	   0.01	0	0	0	1	0
+    //0	    0  0.01	0	0	0	1
+    //0	    0	0 0.001	0	0	0
+    //0	    0	0	0	1	0	0
+    //0	    0	0	0	0	1	0
+    //0	    0	0	0	0	0	1
+    float*Q = (float*)calloc(tracker.n*tracker.n,sizeof(float));
+    Q[0]=0.01;
+    Q[1+tracker.n*1]=0.01;
+    Q[2+tracker.n*2]=0.01;
+    Q[3+tracker.n*3]=0.001;
+    Q[4+tracker.n*4]=5;
+    Q[5+tracker.n*5]=5;
+    Q[6+tracker.n*6]=5;
+    
+    cudaMemcpy(tracker.d_Q,Q,sizeof(float)*tracker.n*tracker.n,cudaMemcpyHostToDevice);
+    free(Q);
+}
+void set_single_R(tracker &tracker){
+    //wrapper function to set the R matrix
+    //m*m
+    //0.1	0	0	0	0
+    //0	   0.1	0	0	0
+    //0	    0  0.1	0	0
+    //0	    0	0  0.1	0
+    //0	    0	0   0	0
+    
+    float*R = (float*)calloc(tracker.m*tracker.m,sizeof(float));
+    for(int i=0;i<tracker.m-1;i++){
+        R[i+(tracker.m)*i]=0.1;
+    }
+    cudaMemcpy(tracker.d_R,R,sizeof(float)*tracker.m*tracker.m,cudaMemcpyHostToDevice);
+    free(R);
 }
 void set_single_H(tracker &tracker){
+    //wrapper function to set the H matrix
+    //m*n, stored at col-major format for cublas compatibility
+    //1  0	0	0	0	0	0
+    //0	 1	0	0	0	0	0
+    //0	 0  1	0	0	0	0
+    //0	 0	0   1	0	0	0
+    //0	 0	0	0	0	0	0
+
+    float*H = (float*)calloc(tracker.m*tracker.n,sizeof(float));
+    for(int i =0;i<tracker.m-1;i++){H[i*tracker.m+i]=1;}
+    
+    cudaMemcpy(tracker.d_H,H,sizeof(float)*tracker.m*tracker.n,cudaMemcpyHostToDevice);
+    free(H);
+}
+
+void make_prediction(tracker &tracker, int num_current_tracks){
+    //wrapper function to do predicted states
+    //use the states in d_state_updated and d_F matrix to make predictions on d_state_predicted
+    //X_p =    F  *   X
+    //7*N    7*7     7*N
+    //row major order stored
+    dim3 dimBlock(256, 1, 1 );
+	dim3 dimGrid(min((num_current_tracks+255)/256,1), 1, 1 );
+    printf("set predicted state, num of tracks: %d\n", num_current_tracks);
+	predict<<<dimGrid,dimBlock>>>(tracker.d_state_updated,tracker.d_state_predicted,
+                                num_current_tracks,tracker.Max_Tracks,tracker.n);
+    cudaError_t errora = cudaGetLastError();
+    if (errora != cudaSuccess){
+        printf("set predicted state kernel failed: %s\n", cudaGetErrorString(errora));
+    }
+	cudaDeviceSynchronize();
 
 }
