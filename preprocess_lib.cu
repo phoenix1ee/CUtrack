@@ -212,7 +212,7 @@ __global__ void Reduce_bestclass(float* d_raw_detection, float* d_filter_detecti
                 best_class_id   = c - 4;   //0-79
             }
         }
-        //write best score to raw detection row 4
+        //write best score to filtered detection row 4
         if (best_score>threshold){
             d_filter_detection[4*Num_raw_detection+idx]=best_score;
             d_raw_class_id[idx]=best_class_id;
@@ -244,6 +244,28 @@ __global__ void update_after_sort(float* d_detection_in, float* d_detection_out,
         }
         //update class id to final
         d_class_out[col]=d_class_in[source_col];
+    }
+}
+
+__global__ void CopyAndConvert(float* d_detector_output, float* d_Z,int Num_raw_detection,int detection_count){
+    //copy and convert from detector to d_Z
+    //input detection: [cx,cy,w,h,score]. 5*count, row major order
+    //each thread handle 1 detections
+    //output detection: [cx,cy,s,r,score]. 5*count, row major order
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int blocksize = blockDim.x*blockDim.y;
+    int totalthreads = blocksize*gridDim.x;
+    if(tid>=detection_count){return;}
+    for(int i=tid;i<detection_count;i+=totalthreads){
+        if (i>=Num_raw_detection){return;}
+        d_Z[i]=d_detector_output[i];
+        d_Z[i+Num_raw_detection]=d_detector_output[i+Num_raw_detection];
+        float w = d_detector_output[i+Num_raw_detection*2];
+        float h = d_detector_output[i+Num_raw_detection*3];
+        d_Z[i+Num_raw_detection*2]=w*h;
+        d_Z[i+Num_raw_detection*3]=w/h;
+        d_Z[i+Num_raw_detection*4]=d_detector_output[i+Num_raw_detection*4];
+        
     }
 }
 
@@ -313,4 +335,12 @@ void NMS(float* d_raw_detections, int* d_raw_class_id, int Num_raw_detection, in
     if (errora != cudaSuccess){
         printf("final detection update kernel failed: %s\n", cudaGetErrorString(errora));
     }
+}
+
+void copyToTracker(float* d_detector_output, float* d_Z,int Num_raw_detection,int detection_count){
+    //wrapper function to copy the final processed detection to the tracker's buffer
+    dim3 block(256,1,1);
+    dim3 grid((detection_count+255)/256,1,1);
+    CopyAndConvert<<<grid,block>>>(d_detector_output,d_Z,Num_raw_detection,detection_count);
+    cudaDeviceSynchronize();
 }
