@@ -83,13 +83,13 @@ __global__ void predict(float*d_state_updated, float* state_predicted, int num_t
         float y_dot = d_state_updated[i+5*N];
         float s_dot = d_state_updated[i+6*N];
         
-        state_predicted[tid]=x+x_dot;   //cx
-        state_predicted[tid]=y+y_dot;   //cy
-        state_predicted[tid]=s+s_dot;   //s
-        state_predicted[tid]=r;   //r
-        state_predicted[tid]=x_dot;   //x.
-        state_predicted[tid]=y_dot;   //y.
-        state_predicted[tid]=s_dot;   //s.        
+        state_predicted[i]=x+x_dot;   //cx
+        state_predicted[i+1*N]=y+y_dot;   //cy
+        state_predicted[i+2*N]=s+s_dot;   //s
+        state_predicted[i+3*N]=r;   //r
+        state_predicted[i+4*N]=x_dot;   //x.
+        state_predicted[i+5*N]=y_dot;   //y.
+        state_predicted[i+6*N]=s_dot;   //s.        
     }
 }
 
