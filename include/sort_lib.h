@@ -156,7 +156,7 @@ void set_single_H(tracker &tracker);
 void make_prediction(tracker &tracker, int num_current_tracks);
 
 //wrapper function for IOU calculation
-void tracker_compute_IOU(tracker* tracker, float* d_detectbox, int activetrack, int activedetection, int image_w, int image_h);
+void tracker_compute_IOU(tracker &tracker, int activetrack, int activedetection);
 
 //wrapper function that calls GPU kernels / library for Kalman filter
 void cublasTranspose_simple(float* d_in, float* d_out, int o_row, int o_col);
