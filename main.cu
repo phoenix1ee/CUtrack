@@ -17,7 +17,7 @@ void free_preprocess_mem(uint8_t* d_preprocess_input,float* d_preprocess_output)
 
 int main(int argc, char** argv){
 try {
-    if (argc != 2) {std::cout<<"wrong argument\n";return 1;}
+    if (argc != 3) {std::cout<<"wrong argument\n";return 1;}
 
     //set a max expected detection 2000
     int Max_Tracks=8400;
@@ -41,6 +41,9 @@ try {
     //setup input stream
     std::string path = argv[1];
     ImageData image = load_jpeg_bgr_hwc_to_host(path);
+
+    std::string path2 = argv[2];
+    ImageData image2 = load_jpeg_bgr_hwc_to_host(path2);
 
     //setup inference model
     YoloDetector detector;
@@ -96,18 +99,28 @@ try {
     //cudaMemcpy(tracker1.d_Z,d_detector_output,sizeof(float)*tracker1.m*Num_raw_detection,cudaMemcpyDeviceToDevice);
     copyToTracker(d_detector_output,tracker1.d_Z,Num_raw_detection,detection_count[0]);
     //calculate states
-    if (first_frame){
+    //if (first_frame){
         // add the new initial state
         set_first_state(tracker1,0,detection_count[0]);
         set_first_Pcov(tracker1,0,detection_count[0]);
         trackcount = detection_count[0];
         first_frame = !first_frame;
         make_prediction(tracker1,trackcount);
-    }else{  //for each frame after 1st frame
+
+    cudaMemcpy(d_preprocess_input,image2.data,data_size_to_preprocess,cudaMemcpyHostToDevice);
+    frame_preprocess(d_preprocess_input,d_preprocess_output,height,width,out_height,out_width);
+    detector.run();
+    NMS(d_detector_output,d_class_id,Num_raw_detection,height_raw_detection,d_detection_buffer,d_class_id_buffer,d_detection_count);
+    cudaMemcpy(detection_count,d_detection_count,sizeof(int),cudaMemcpyDeviceToHost);
+    std::cout<<"detection count:"<<detection_count[0]<<std::endl;
+    copyToTracker(d_detector_output,tracker1.d_Z,Num_raw_detection,detection_count[0]);
+    //}else{  //for each frame after 1st frame
         //prediction
         make_prediction(tracker1,trackcount);
+        //make_prediction(tracker1,trackcount);
         //compute IOU and cost matrixbetween predicted box and detection
-
+        std::cout<<"track count:"<<trackcount<<"  detection count:"<<detection_count[0]<<std::endl;
+        tracker_compute_IOU(tracker1,trackcount,detection_count[0]);
         //hungarian assignment
 
         //update using kalman gain
@@ -117,19 +130,20 @@ try {
         //Create new tracks for unmatched detections
 
         //Output confirmed tracks
-    }
-
+    //}
     //writeDevice2DArrayToFile(tracker1.d_F,tracker1.n,tracker1.n,"dF.txt");
     //writeDevice2DArrayToFile(tracker1.d_Q,tracker1.n,tracker1.n,"dQ.txt");
     //writeDevice2DArrayToFile(tracker1.d_R,tracker1.m,tracker1.m,"dR.txt");
     //writeDevice2DArrayToFile(tracker1.d_H,tracker1.n,tracker1.m,"dH.txt");
-    writeDevice2DArrayToFile(tracker1.d_state_predicted,tracker1.n,tracker1.Max_Tracks,"d_prediction.txt");
+    //writeDevice2DArrayToFile(tracker1.d_state_predicted,tracker1.n,tracker1.Max_Tracks,"d_prediction.txt");
+    writeDevice2DArrayToFile(tracker1.d_IOU,trackcount,detection_count[0],"d_IOU.txt");
 
     //writeDevice2DArrayToFile(tracker1.d_state_updated,tracker1.n,tracker1.Max_Tracks,"stateTest.txt");
 
     //writeDevice2DArrayToFile(tracker1.d_Pcov,tracker1.n*tracker1.Max_Tracks,tracker1.n,"PcovTest.txt");
 
-
+    free_jpeg_from_host(image);
+    free_jpeg_from_host(image2);
 
 
     free_preprocess_mem(d_preprocess_input,d_preprocess_output);
