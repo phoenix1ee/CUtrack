@@ -15,18 +15,25 @@ typedef struct tracker{
     int* d_track_id;    //track IDs   N
     float * d_state_predicted;    //state variables   n*N
     float * d_state_updated;    //state variables   n*N
-    float * d_F;                  //transition matrix n*n
+    float * d_F;                  //transition matrix n*n, row major storage
     float * d_Q;            //process noise   n*n  
     float* d_Pcov;       //state covariance matrix   n*n*N
     int* d_age;         //age of each tracks    N
     int* d_hit_streak;  //consecutive hit for each track   N
-    float* d_Z;         // measurement/dection buffer, m*M
+    float* d_Z;         // measurement/dection buffer, m*M,   row major
     float* d_S;float* d_K;float* d_H;float* d_R; //matrix for kalman gain
     //     N*m*m     N*n*m       m*n        m*m
+    //                         col major    col major
     float** d_each_K;float** d_each_S;int* d_info;    //buffer space for cublas and cusolver
     
     float* d_IOU;        //buffer for IOU calculation, N*M
+    float* d_bid;   //buffer for bid value matrix, N*M
+    int* d_bid_target;   //buffer for bid target value matrix, N
+    float* d_price;     //buffer for price of each detection, M
+    int* d_match_detections;     //buffer for assignment of detections to tracks, M
+    int* d_match_track;     //buffer for assigned detections for each tracks, N
     
+
     //constructor
     tracker(int MT=2000,int MD=2000, int measure=4, int state=7):
         Max_Tracks(MT),Max_detection(MD), m(measure),n(state){}
@@ -49,7 +56,13 @@ typedef struct tracker{
                         +sizeof(float)*n*m
                         +sizeof(float)*m*m
                         +sizeof(int)*Max_Tracks
-                        +sizeof(float)*Max_Tracks*Max_detection;
+                        +sizeof(float)*Max_Tracks*Max_detection
+                        +sizeof(float)*Max_Tracks*Max_detection
+                        +sizeof(int)*Max_Tracks
+                        +sizeof(float)*Max_detection
+                        +sizeof(int)*Max_detection
+                        +sizeof(int)*Max_Tracks;   
+                                  
 
         cudaMalloc((void**)&d_base,total);
         size_t offset = 0;
@@ -94,7 +107,22 @@ typedef struct tracker{
         offset+=sizeof(float)*m*m;             //m*m
 
         d_info=(int*)(d_base+offset);         //1*Max_Tracks
-        offset+=sizeof(float)*Max_Tracks;
+        offset+=sizeof(int)*Max_Tracks;
+
+        d_price=(float*)(d_base+offset);         //Max_Tracks
+        offset+=sizeof(int)*Max_Tracks;
+
+        d_bid_target=(int*)(d_base+offset);         //Max_tracks
+        offset+=sizeof(int)*Max_Tracks;
+
+        d_match_detections=(int*)(d_base+offset);         //Max_detection
+        offset+=sizeof(int)*Max_detection;
+
+        d_match_track=(int*)(d_base+offset);         //Max_tracks
+        offset+=sizeof(int)*Max_Tracks;
+
+        d_bid =(float*)(d_base+offset);         //Max_Detection*Max_Tracks
+        offset+=sizeof(float)*Max_detection*Max_Tracks;
 
         d_IOU=(float*)(d_base+offset);         //Max_Detection*Max_Tracks
 
@@ -168,6 +196,7 @@ void kalman_gain_batch(bool*inactive, float* d_S, float*d_PHT, float*d_P,float*d
 void tracker_kalman_gain(tracker* trackerA, int totaltracks);
 
 //wrapper function that calls the GPU kernel for hungarian algorithm(different design)
+void hungarian_assignment(tracker &tracker,int width_detections, int height_tracks);
 void transposeArray(float *d_a,float *d_b,int matrixwidth, int matrixheight);
 void reductionStreamMemory(float* input, int totalsize, int blocksize, int width, int height);
 void reductionmappedmem(float* input, int totalsize, int blocksize, int width, int height);
