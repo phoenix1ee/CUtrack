@@ -6,7 +6,7 @@
 
 __global__ void set_first_state_kernel(float* source, float* dest, int N, int start_col, int count){
     //source: 5*N row major, each detection sub element in contiguous
-    //[cx,cy,w,h]
+    //[cx,cy,s,r]
     //dest: n*N row major, each state factor in contiguous
     //[cx,cy,s,r,x.,y.,s.]
     //1 thread for each states
@@ -17,13 +17,11 @@ __global__ void set_first_state_kernel(float* source, float* dest, int N, int st
 
         int col = start_col+i;
         if (col>=N)return;
-        float w = source[col+2*N];
-        float h = source[col+3*N];
         
         dest[col]=source[col];   //cx
         dest[col+N]=source[col+N];   //cy
-        dest[col+2*N]=w*h;   //s
-        dest[col+3*N]=w/h;   //r
+        dest[col+2*N]=source[col+2*N];   //s
+        dest[col+3*N]=source[col+3*N];   //r
         dest[col+4*N]=1e-3;   //x.
         dest[col+5*N]=1e-3;   //y.
         dest[col+6*N]=1e-3;   //s.        
@@ -63,7 +61,7 @@ __global__ void set_first_pcov_kernel(float* dest, int N, int start_matrix_ID, i
 }
 
 __global__ void predict(float*d_state_updated, float* state_predicted, int num_tracks, int N, int n){
-    //make prediction based on detection at d_Z
+    //make prediction based on F and current state at d_state_updated
     //assume start at track 0, for number of current tracks
     //1 thread for 1 tracks
     //X_p =    F  *   X_updated
@@ -147,13 +145,13 @@ void set_single_F(tracker &tracker){
 void set_single_Q(tracker &tracker){
     //wrapper function to set the Q matrix
     //n*n
-    //0.01	0	0	0	1	0	0
-    //0	   0.01	0	0	0	1	0
-    //0	    0  0.01	0	0	0	1
+    //0.01	0	0	0	0	0	0
+    //0	   0.01	0	0	0	0	0
+    //0	    0  0.01	0	0	0	0
     //0	    0	0 0.001	0	0	0
-    //0	    0	0	0	1	0	0
-    //0	    0	0	0	0	1	0
-    //0	    0	0	0	0	0	1
+    //0	    0	0	0	5	0	0
+    //0	    0	0	0	0	5	0
+    //0	    0	0	0	0	0	5
     float*Q = (float*)calloc(tracker.n*tracker.n,sizeof(float));
     Q[0]=0.01;
     Q[1+tracker.n*1]=0.01;
@@ -168,16 +166,18 @@ void set_single_Q(tracker &tracker){
 }
 void set_single_R(tracker &tracker){
     //wrapper function to set the R matrix
+    //m include an extra unit for score
+    //but R do not need, only use m-1 as dimension,
+    //stored at col-major format for cublas compatibility, but right now no influence
     //m*m
-    //0.1	0	0	0	0
-    //0	   0.1	0	0	0
-    //0	    0  0.1	0	0
-    //0	    0	0  0.1	0
-    //0	    0	0   0	0
-    
-    float*R = (float*)calloc(tracker.m*tracker.m,sizeof(float));
-    for(int i=0;i<tracker.m-1;i++){
-        R[i+(tracker.m)*i]=0.1;
+    //0.1	0	0	0
+    //0	   0.1	0	0
+    //0	    0  0.1	0
+    //0	    0	0  0.1
+    int m = tracker.m-1;
+    float*R = (float*)calloc(m*m,sizeof(float));
+    for(int i=0;i<m;i++){
+        R[i+m*i]=0.1;
     }
     cudaMemcpy(tracker.d_R,R,sizeof(float)*tracker.m*tracker.m,cudaMemcpyHostToDevice);
     free(R);
@@ -185,14 +185,14 @@ void set_single_R(tracker &tracker){
 void set_single_H(tracker &tracker){
     //wrapper function to set the H matrix
     //m*n, stored at col-major format for cublas compatibility
+    //only use m-1 as dimension
     //1  0	0	0	0	0	0
     //0	 1	0	0	0	0	0
     //0	 0  1	0	0	0	0
     //0	 0	0   1	0	0	0
-    //0	 0	0	0	0	0	0
-
-    float*H = (float*)calloc(tracker.m*tracker.n,sizeof(float));
-    for(int i =0;i<tracker.m-1;i++){H[i*tracker.m+i]=1;}
+    int m = tracker.m-1;
+    float*H = (float*)calloc(m*tracker.n,sizeof(float));
+    for(int i =0;i<m;i++){H[i*tracker.m+i]=1;}
     
     cudaMemcpy(tracker.d_H,H,sizeof(float)*tracker.m*tracker.n,cudaMemcpyHostToDevice);
     free(H);
