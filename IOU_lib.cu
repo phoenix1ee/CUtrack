@@ -4,9 +4,9 @@
 __device__ float boxIOUxysr(float acx,float acy,float as,float ar,
                         float bcx,float bcy,float bs,float br){
     //a/b->[cx,cy,s,r]
-    float aw = as*ar;
+    float aw = sqrt(as*ar);
     float ah = sqrt(as/ar);
-    float bw = bs*br;
+    float bw = sqrt(bs*br);
     float bh = sqrt(bs/br);
     
     float ax1=acx-aw/2;
@@ -28,10 +28,7 @@ __device__ float boxIOUxysr(float acx,float acy,float as,float ar,
     float h = max(0.0f, yy2 - yy1);
     float inter = w * h;
 
-    float area_a = aw*ah;
-    float area_b = bw*bh;
-
-    return inter / (area_a + area_b - inter + 1e-6f);
+    return inter / (as + bs - inter + 1e-6f);
 }
 
 
@@ -137,7 +134,7 @@ __global__ void computeIOUmatrix(float* d_predictedstate, float* d_detectbox, fl
     //calculate id
 
     int blockid = blockIdx.x;
-    int tid = threadIdx.y+blockDim.x+threadIdx.x;
+    int tid = threadIdx.y*blockDim.x+threadIdx.x;
     int blocksize = blockDim.x*blockDim.y;
     int num_block = gridDim.x;
     if (blockid >= Ntracks || tid>=Mdetection) return;
@@ -157,9 +154,8 @@ __global__ void computeIOUmatrix(float* d_predictedstate, float* d_detectbox, fl
 
             //calculate IOU value
             float IOU = boxIOUxysr(p_x,p_y,p_s,p_r,d_x,d_y,d_s,d_r);
-            printf(".2f",IOU);
             //write to d_IOUmatrix, use row major order at here to fit reduction kernels
-            d_IOUmatrix[i*Mdetection+j]=1-IOU;
+            d_IOUmatrix[i*Mdetection+j]=IOU;
         }
     }
 }
@@ -176,14 +172,14 @@ void tracker_compute_IOU2(tracker* tracker, float* d_detectbox, int activetrack,
 
 void tracker_compute_IOU(tracker &tracker, int activetrack, int activedetection){
     //wrapper function to compute IOU
-    
+    printf("compute IOU......");
     dim3 dimBlock(16, 16, 1 );
 	dim3 dimGrid((activetrack+255)/256, 1, 1 );
     computeIOUmatrix<<<dimGrid,dimBlock>>>(tracker.d_state_predicted,tracker.d_Z,tracker.d_IOU,
         activetrack,activedetection,tracker.Max_Tracks,tracker.Max_detection,tracker.n,tracker.m);
     cudaError_t errora = cudaGetLastError();
     if (errora != cudaSuccess){
-        printf("set predicted state kernel failed: %s\n", cudaGetErrorString(errora));
+        printf("IOU compute kernel failed: %s\n", cudaGetErrorString(errora));
     }
 	cudaDeviceSynchronize();
 
