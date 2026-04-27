@@ -93,10 +93,7 @@ try {
     //update host detection counts
     cudaMemcpy(detection_count,d_detection_count,sizeof(int),cudaMemcpyDeviceToHost);
     std::cout<<"detection count:"<<detection_count[0]<<std::endl;
-    // copy/transpose the detection to tracker's measurement matrix
-    //transposeArray(d_detector_output,d_detection_buffer,Num_raw_detection,5);
-    //
-    //cudaMemcpy(tracker1.d_Z,d_detector_output,sizeof(float)*tracker1.m*Num_raw_detection,cudaMemcpyDeviceToDevice);
+    // copy/convert the detections to tracker's measurement matrix buffer
     copyToTracker(d_detector_output,tracker1.d_Z,Num_raw_detection,detection_count[0]);
     //calculate states
     //if (first_frame){
@@ -105,8 +102,6 @@ try {
         set_first_Pcov(tracker1,0,detection_count[0]);
         trackcount = detection_count[0];
         first_frame = !first_frame;
-        make_prediction(tracker1,trackcount);
-
     cudaMemcpy(d_preprocess_input,image2.data,data_size_to_preprocess,cudaMemcpyHostToDevice);
     frame_preprocess(d_preprocess_input,d_preprocess_output,height,width,out_height,out_width);
     detector.run();
@@ -117,16 +112,25 @@ try {
     //}else{  //for each frame after 1st frame
         //prediction
         make_prediction(tracker1,trackcount);
-        //make_prediction(tracker1,trackcount);
+        writeDevice2DArrayToFile(tracker1.d_state_predicted,tracker1.n,tracker1.Max_Tracks,"d_prediction.txt");
         //compute IOU and cost matrixbetween predicted box and detection
         std::cout<<"track count:"<<trackcount<<"  detection count:"<<detection_count[0]<<std::endl;
         tracker_compute_IOU(tracker1,trackcount,detection_count[0]);
+
+        writeDevice2DArrayToFile(tracker1.d_IOU,trackcount,detection_count[0],"d_IOU.txt");
         //hungarian assignment
-
-        //update using kalman gain
-
-        //Handle unmatched tracks
-
+        hungarian_assignment(tracker1,detection_count[0],trackcount);
+        writeDevice2DArrayToFile(tracker1.d_price,1,detection_count[0],"d_price.txt");
+        //writeDevice2DArrayToFile(tracker1.d_bid,trackcount,detection_count[0],"d_bid.txt");
+        //writeDevice2DArrayToFileINT(tracker1.d_bid_target,1,trackcount,"d_bidtarget.txt");
+        writeDevice2DArrayToFileINT(tracker1.d_match_track,1,trackcount,"d_matchtrack.txt");
+        writeDevice2DArrayToFileINT(tracker1.d_match_detections,1,detection_count[0],"d_matchdetection.txt");
+        //writeDevice2DArrayToFileINT(tracker1.d_match_detections,1,detection_count[0],"d_detection_match.txt");
+        //Matched track → Kalman update
+        tracker_kalman_gain(&tracker1,trackcount);
+        writeDevice2DArrayToFile(tracker1.d_K,tracker1.n*trackcount,tracker1.n,"dK.txt");
+        //Unmatched track→ track age++
+        
         //Create new tracks for unmatched detections
 
         //Output confirmed tracks
@@ -135,10 +139,9 @@ try {
     //writeDevice2DArrayToFile(tracker1.d_Q,tracker1.n,tracker1.n,"dQ.txt");
     //writeDevice2DArrayToFile(tracker1.d_R,tracker1.m,tracker1.m,"dR.txt");
     //writeDevice2DArrayToFile(tracker1.d_H,tracker1.n,tracker1.m,"dH.txt");
-    //writeDevice2DArrayToFile(tracker1.d_state_predicted,tracker1.n,tracker1.Max_Tracks,"d_prediction.txt");
-    writeDevice2DArrayToFile(tracker1.d_IOU,trackcount,detection_count[0],"d_IOU.txt");
+    //writeDevice2DArrayToFile(tracker1.d_Z,tracker1.m,tracker1.Max_detection,"d_detection.txt");
 
-    //writeDevice2DArrayToFile(tracker1.d_state_updated,tracker1.n,tracker1.Max_Tracks,"stateTest.txt");
+    //writeDevice2DArrayToFile(tracker1.d_state_updated,tracker1.n,tracker1.Max_Tracks,"stateTest2.txt");
 
     //writeDevice2DArrayToFile(tracker1.d_Pcov,tracker1.n*tracker1.Max_Tracks,tracker1.n,"PcovTest.txt");
 
