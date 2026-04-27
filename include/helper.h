@@ -124,6 +124,13 @@ inline void writeDevice2DArrayToFile(const float* d_data, int rows, int cols, co
     free(data);
 }
 
+inline void writeDevice2DArrayToFileINT(const int* d_data, int rows, int cols, const char* filename){
+    int* data = (int*)malloc(sizeof(int)*rows*cols);
+    cudaMemcpy(data,d_data,sizeof(float)*rows*cols,cudaMemcpyDeviceToHost);
+    write2DArrayToFileInt(data,rows,cols,filename);
+    free(data);
+}
+
 
 #include <cuda_runtime.h>
 
