@@ -172,7 +172,6 @@ void tracker_compute_IOU2(tracker* tracker, float* d_detectbox, int activetrack,
 
 void tracker_compute_IOU(tracker &tracker, int activetrack, int activedetection){
     //wrapper function to compute IOU
-    printf("compute IOU......");
     dim3 dimBlock(16, 16, 1 );
 	dim3 dimGrid((activetrack+255)/256, 1, 1 );
     computeIOUmatrix<<<dimGrid,dimBlock>>>(tracker.d_state_predicted,tracker.d_Z,tracker.d_IOU,
