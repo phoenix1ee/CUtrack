@@ -17,13 +17,16 @@ typedef struct tracker{
     float * d_state_updated;    //state variables   n*N
     float * d_F;                  //transition matrix n*n, row major storage
     float * d_Q;            //process noise   n*n  
-    float* d_Pcov;       //state covariance matrix   n*n*N
+    float* d_Pcov;         //state covariance matrix   n*n*N
+    float* d_Pcov_predict; //predicted state covariance matrix   n*n*N
+
     int* d_age;         //age of each tracks    N
     int* d_hit_streak;  //consecutive hit for each track   N
     float* d_Z;         // measurement/dection buffer, m*M,   row major
+    float* d_y;          // innovation buffer, m*N,   row major
     float* d_S;float* d_K;float* d_H;float* d_R; //matrix for kalman gain
     //     N*m*m     N*n*m       m*n        m*m
-    //                         col major    col major
+    //              col major   col major    col major
     float** d_each_K;float** d_each_S;int* d_info;    //buffer space for cublas and cusolver
     
     float* d_IOU;        //buffer for IOU calculation, N*M
@@ -48,9 +51,11 @@ typedef struct tracker{
                         +sizeof(float)*n*n
                         +sizeof(float)*n*n
                         +sizeof(float)*Max_Tracks*n*n
+                        +sizeof(float)*Max_Tracks*n*n
                         +sizeof(int)*Max_Tracks
                         +sizeof(int)*Max_Tracks
                         +sizeof(float)*Max_detection*m
+                        +sizeof(float)*Max_Tracks*m
                         +sizeof(float)*m*m*Max_Tracks
                         +sizeof(float)*n*m*Max_Tracks
                         +sizeof(float)*n*m
@@ -85,6 +90,9 @@ typedef struct tracker{
         d_Pcov=(float*)(d_base+offset);
         offset+=sizeof(float)*Max_Tracks*n*n;  //n*n*Max_Tracks
 
+        d_Pcov_predict=(float*)(d_base+offset);
+        offset+=sizeof(float)*Max_Tracks*n*n;  //n*n*Max_Tracks
+
         d_age=(int*)(d_base+offset);
         offset+=sizeof(int)*Max_Tracks;     //1*Max_Tracks
 
@@ -93,6 +101,9 @@ typedef struct tracker{
 
         d_Z=(float*)(d_base+offset);
         offset+=sizeof(float)*Max_detection*m; //Max_detection*m
+
+        d_y=(float*)(d_base+offset);
+        offset+=sizeof(float)*Max_Tracks*m; //Max_detection*m
 
         d_S=(float*)(d_base+offset);
         offset+=sizeof(float)*m*m*Max_Tracks;  //m*m*Max_Tracks
@@ -157,7 +168,7 @@ __global__ void print_device_matrix_kernel(float*d_input,int cols,int rows);
 
 //custom kernels
 //matrix addition-1 to many-batch mode
-__global__ void MMAdd1toMany(float* batchedA, float* singleB, int row, int col, int batchCount);
+__global__ void MMAdd1toMany(float* batchedA, float* singleB, int strideA, int row, int col, int batchCount);
 
 //wrapper function for input of data
 struct ImageData load_jpeg_bgr_hwc_to_host(const std::string& path);
@@ -177,11 +188,14 @@ void copyToTracker(float* d_detector_output, float* d_Z,int Num_raw_detection,in
 //wrapper function for state udate
 void set_first_state(tracker &tracker, int num_current_tracks, int num_added_tracks);
 void set_first_Pcov(tracker &tracker, int current_tracks, int num_added_tracks);
+void set_first_age_hit(tracker &tracker, int num_current_tracks, int num_added_tracks);
 void set_single_F(tracker &tracker);
 void set_single_R(tracker &tracker);
 void set_single_Q(tracker &tracker);
 void set_single_H(tracker &tracker);
-void make_prediction(tracker &tracker, int num_current_tracks);
+void make_state_prediction(tracker &tracker, int num_current_tracks);
+void make_cov_prediction(tracker &tracker, int num_current_tracks);
+void update_states_Kalman(tracker &tracker, int num_current_tracks);
 
 //wrapper function for IOU calculation
 void tracker_compute_IOU(tracker &tracker, int activetrack, int activedetection);
