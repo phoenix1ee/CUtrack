@@ -6,7 +6,8 @@
 #include "include/sort_lib.h"
 
 
-__global__ void MMAdd1toMany(float* batchedA, float* singleB, int row, int col, int batchCount){
+__global__ void MMAdd1toMany(float* batchedA, float* singleB, int strideA, 
+                            int row, int col, int batchCount){
     int blockid = (gridDim.x*blockIdx.y) + blockIdx.x;
 	int gridsize = gridDim.x*gridDim.y;
 	if (blockid >= batchCount) return;
@@ -18,14 +19,14 @@ __global__ void MMAdd1toMany(float* batchedA, float* singleB, int row, int col, 
     for(int i=tid;i<row*col;i+=blocksize){
         B[i]=singleB[i];
     }
+    //loop to write to A
     for(int mid = blockid;mid<batchCount;mid+=gridsize){
         for(int j=tid;j<row*col;j+=blocksize){
             //printf("HPHT is %.2f\n",batchedA[mid*row*col+j]);
-            batchedA[mid*row*col+j]+=B[j];
+            batchedA[mid*strideA+j]+=B[j];
         }
     }
 }
-
 
 __global__ void print_device_matrix_kernel(float*d_input,int cols,int rows){
     for(int i=0;i<rows;i++){
@@ -387,13 +388,16 @@ void kalman_gain_batch(bool*inactive, float* d_S, float*d_PHT, float*d_P,float*d
 
 void tracker_kalman_gain(tracker* trackerA, int totaltracks){
     //for use with custom Struct Tracker
-    float*d_S = trackerA->d_S;
+    float*d_S = trackerA->d_S; //strided between d_S is m=5*m=5
 
-    float*d_PHT=trackerA->d_K;
-    float*d_P=trackerA->d_Pcov;
+    float*d_PHT=trackerA->d_K; //strided between d_K is m=5*n
+    float*d_P=trackerA->d_Pcov_predict;
     float*d_H=trackerA->d_H;
     float*d_R=trackerA->d_R;
-    int m = trackerA->m; int n=trackerA->n;
+    int m = trackerA->m-1; //m is allocated with 1 more unit in tracker object.
+    //but only 4 are used as m. So matrix dimension m =4, but strided between d_K is m=5*n
+    //d_H and d_R is fine because they are single matrix and declared as m=4, with unused bytes at the end
+    int n=trackerA->n;
     
     //solve for Kalman gain for a batch of P, H and R
     //P=n*n H=m*n R=m*m   for totaltracks no. of tracks
@@ -417,47 +421,39 @@ void tracker_kalman_gain(tracker* trackerA, int totaltracks){
                                   d_P, n, n*n,
                                   d_H, m, 0,
                                   &beta,
-                                  d_PHT, n, m*n,
+                                  d_PHT, n, (m+1)*n,
                                   totaltracks);
     cudaDeviceSynchronize();
+    //writeDevice2DArrayToFile(d_PHT,m,n,"d_PHT.txt");
     if (cuA!=CUBLAS_STATUS_SUCCESS){
         printf("sgemm error");
     }
-    /*
-    float* PHT = (float*)malloc(sizeof(float)*n*m*totaltracks);
-    cudaMemcpy(PHT,d_PHT,sizeof(float)*n*m*totaltracks,cudaMemcpyDeviceToHost);
     cudaError_t errorb = cudaGetLastError();
     if (errorb != cudaSuccess){
-        printf("CUDA error: %s\n", cudaGetErrorString(errorb));
+        printf("CUDA error on PHt cublas: %s\n", cudaGetErrorString(errorb));
     }
-    for (int i=0;i<totaltracks;i++){
-        printf("track %d :\n",i);
-        printmatrix_colmajor(PHT+i*m*n,m,n);
-    }
-    free(PHT);
-    */
-
-
+    
     //calculate H*PH^T, m*m
     cuA = cublasSgemmStridedBatched(handle, CUBLAS_OP_N, CUBLAS_OP_N,
                                   m, m, n,
                                   &alpha,
                                   d_H, m, 0,
-                                  d_PHT, n, n*m,
+                                  d_PHT, n, n*(m+1),
                                   &beta,
-                                  d_S, m, m*m,
+                                  d_S, m, (m+1)*(m+1),
                                   totaltracks);
     cudaDeviceSynchronize();
     if (cuA!=CUBLAS_STATUS_SUCCESS){
         printf("sgemm error");
     }
     //calculate HPH^T+R, m*m
-    MMAdd1toMany<<<totaltracks,64,m*m*sizeof(float)>>>(d_S,d_R,m,m,totaltracks);
+    MMAdd1toMany<<<totaltracks,64,m*m*sizeof(float)>>>(d_S,d_R,(m+1)*(m+1),m,m,totaltracks);
     cudaDeviceSynchronize();
     cudaError_t errora = cudaGetLastError();
     if (errora != cudaSuccess){
         printf("CUDA error: %s\n", cudaGetErrorString(errora));
     }
+    //writeDevice2DArrayToFile(d_S,m,m,"d_S.txt");
 
     cusolverDnHandle_t k_handle = NULL;
     //cusolverStatus_t cusolver_status;
@@ -486,6 +482,10 @@ void tracker_kalman_gain(tracker* trackerA, int totaltracks){
                             d_info, 
                             totaltracks);
     cudaDeviceSynchronize();
+    errora = cudaGetLastError();
+    if (errora != cudaSuccess){
+        printf("K factorization cublas failed: %s\n", cudaGetErrorString(errora));
+    }
     if (cusolver_status!=CUSOLVER_STATUS_SUCCESS){
         printf("factorization error");
     }
@@ -524,8 +524,7 @@ void tracker_kalman_gain(tracker* trackerA, int totaltracks){
                         totaltracks);    
     cudaDeviceSynchronize();
     //d_PHT now contains kalman gain matrix n*m.
+    writeDevice2DArrayToFile(d_PHT,m,n,"d_K.txt");
 
     cublasDestroy(handle);
-
-
     }
