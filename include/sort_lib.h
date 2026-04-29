@@ -12,13 +12,23 @@ typedef struct tracker{
 
     char* d_base; //base address for all device memory
 
-    int* d_track_id;    //track IDs   N
+    int* d_track_status;    //track statuss   N
+    int* d_good_count;     //buffer to count good to disply tracks   1
+    int* d_active_count;   //buffer to count active tracks      1
+    int* d_bad_count;        //buffer to count bad tracks       1
+
+    int* d_totaltracks;    //buffer to store current track count    1
+    int* d_totaldetections;  //buffer to store current detection count    1
+
     float * d_state_predicted;    //state variables   n*N
     float * d_state_updated;    //state variables   n*N
+    float * d_state_output;    //state variables   n*N
+    
     float * d_F;                  //transition matrix n*n, row major storage
     float * d_Q;            //process noise   n*n  
     float* d_Pcov;         //state covariance matrix   n*n*N
     float* d_Pcov_predict; //predicted state covariance matrix   n*n*N
+    float* d_Pcov_buffer; //buffer place for covariance calculation   n*n*N
 
     int* d_age;         //age of each tracks    N
     int* d_hit_streak;  //consecutive hit for each track   N
@@ -48,8 +58,10 @@ typedef struct tracker{
         size_t total = sizeof(int)*Max_Tracks
                         +sizeof(float)*Max_Tracks*n
                         +sizeof(float)*Max_Tracks*n
+                        +sizeof(float)*Max_Tracks*n
                         +sizeof(float)*n*n
                         +sizeof(float)*n*n
+                        +sizeof(float)*Max_Tracks*n*n
                         +sizeof(float)*Max_Tracks*n*n
                         +sizeof(float)*Max_Tracks*n*n
                         +sizeof(int)*Max_Tracks
@@ -67,12 +79,18 @@ typedef struct tracker{
                         +sizeof(float)*Max_detection
                         +sizeof(int)*Max_detection
                         +sizeof(int)*Max_Tracks;   
-                                  
+                       
+        cudaMalloc((void**)&d_good_count,sizeof(int)*8);
+        d_active_count=d_good_count+1;
+        d_bad_count=d_good_count+2;
+        
+        d_totaltracks=d_good_count+3;
+        d_totaldetections=d_good_count+4;
 
         cudaMalloc((void**)&d_base,total);
         size_t offset = 0;
 
-        d_track_id=(int*)(d_base+offset);
+        d_track_status=(int*)(d_base+offset);
         offset+=sizeof(int)*Max_Tracks;       //1*Max_Tracks
 
         d_state_predicted=(float*)(d_base+offset);
@@ -80,6 +98,9 @@ typedef struct tracker{
 
         d_state_updated=(float*)(d_base+offset);
         offset+=sizeof(float)*Max_Tracks*n;   //n*Max_Tracks        
+
+        d_state_output=(float*)(d_base+offset);
+        offset+=sizeof(float)*Max_Tracks*n;   //4*Max_Tracks        
 
         d_F=(float*)(d_base+offset);
         offset+=sizeof(float)*n*n;            //n*n        
@@ -91,6 +112,9 @@ typedef struct tracker{
         offset+=sizeof(float)*Max_Tracks*n*n;  //n*n*Max_Tracks
 
         d_Pcov_predict=(float*)(d_base+offset);
+        offset+=sizeof(float)*Max_Tracks*n*n;  //n*n*Max_Tracks
+
+        d_Pcov_buffer=(float*)(d_base+offset);
         offset+=sizeof(float)*Max_Tracks*n*n;  //n*n*Max_Tracks
 
         d_age=(int*)(d_base+offset);
@@ -188,7 +212,7 @@ void copyToTracker(float* d_detector_output, float* d_Z,int Num_raw_detection,in
 //wrapper function for state udate
 void set_first_state(tracker &tracker, int num_current_tracks, int num_added_tracks);
 void set_first_Pcov(tracker &tracker, int current_tracks, int num_added_tracks);
-void set_first_age_hit(tracker &tracker, int num_current_tracks, int num_added_tracks);
+void set_first_age_hit_status(tracker &tracker, int num_current_tracks, int num_added_tracks);
 void set_single_F(tracker &tracker);
 void set_single_R(tracker &tracker);
 void set_single_Q(tracker &tracker);
@@ -196,6 +220,12 @@ void set_single_H(tracker &tracker);
 void make_state_prediction(tracker &tracker, int num_current_tracks);
 void make_cov_prediction(tracker &tracker, int num_current_tracks);
 void update_states_Kalman(tracker &tracker, int num_current_tracks);
+void update_Pcov(tracker &tracker, int num_current_tracks);
+void update_track_status(tracker &tracker, int num_current_tracks);
+void update_output_buffer(tracker &tracker,int num_current_tracks, int w_yolo, int h_yolo, int w_orig, int h_orig);
+void update_track_count(tracker &tracker);
+void rearrangetracks(tracker &tracker,int num_current_tracks);
+void add_new_tracks(tracker &tracker,int num_current_track, int num_detections);
 
 //wrapper function for IOU calculation
 void tracker_compute_IOU(tracker &tracker, int activetrack, int activedetection);
