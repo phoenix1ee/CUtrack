@@ -6,14 +6,7 @@
 #include "include/inference.h"
 #include <onnxruntime_cxx_api.h>
 
-void set_preprocess_mem(ImageData &image,YoloDetector &detector,
-                    uint8_t** d_preprocess_input){
-}
 
-void free_preprocess_mem(uint8_t* d_preprocess_input,float* d_preprocess_output){
-    cudaFree(d_preprocess_input);
-    cudaFree(d_preprocess_output);
-}
 
 int main(int argc, char** argv){
 try {
@@ -31,10 +24,8 @@ try {
     tracker1.allocateOnDevice();
     int detection_count[1] = {0};
     int trackcount = 0;
-    int* d_detection_count;
-    cudaMalloc((void**)&d_detection_count,sizeof(int));
-    int* d_track_count;
-    cudaMalloc((void**)&d_track_count,sizeof(int));
+    int* d_detection_count=tracker1.d_totaldetections;
+    int* d_track_count=tracker1.d_totaltracks;
 
     set_single_F(tracker1);
     set_single_Q(tracker1);
@@ -57,7 +48,7 @@ try {
     int width = image.width;
     int height = image.height;
     size_t data_size_to_preprocess = image.size;
-
+    std::cout<<width<<" "<<height<<std::endl;
     int out_width = detector.input_shapes[0][3];
     int out_height = detector.input_shapes[0][2];
     size_t data_size_after_preprocess = sizeof(float)*out_height*out_width*3;
@@ -103,8 +94,9 @@ try {
         // add the new initial state
         set_first_state(tracker1,0,detection_count[0]);
         set_first_Pcov(tracker1,0,detection_count[0]);
-        set_first_age(tracker1,0,detection_count[0]);
+        set_first_age_hit_status(tracker1,0,detection_count[0]);
         writeDevice2DArrayToFileINT(tracker1.d_age,1,detection_count[0],"d_age.txt");
+        cudaMemcpy(d_track_count,d_detection_count,sizeof(int),cudaMemcpyDeviceToDevice);
         trackcount = detection_count[0];
         first_frame = !first_frame;
     cudaMemcpy(d_preprocess_input,image2.data,data_size_to_preprocess,cudaMemcpyHostToDevice);
@@ -136,30 +128,38 @@ try {
         //update the tracks, also handle hit streak and age of tracks
         //matched->increase hit, Unmatched track→ track age++
         update_states_Kalman(tracker1,trackcount);
+        update_Pcov(tracker1, trackcount);
         //writeDevice2DArrayToFile(tracker1.d_K,tracker1.m-1,tracker1.n,"dK.txt");
-        //handle hit streak and age of tracks. matched->increase hit, Unmatched track→ track age++
-        //delete tracks if too old
-
+        //update tracks
+        update_track_status(tracker1,trackcount);
+        //update track count for deletion
+        update_track_count(tracker1);
+        //prepare output confirmed tracks
+        update_output_buffer(tracker1,trackcount,out_width,out_height,width,height);
+        //cleanup
+        rearrangetracks(tracker1, trackcount);
         //Create new tracks for unmatched detections
-
-        //Output confirmed tracks
+        //grab new track counts after delete, and added new track to the back
+        cudaMemcpy(&trackcount,tracker1.d_totaltracks,sizeof(int),cudaMemcpyDeviceToHost);
+        //writeDevice2DArrayToFileINT(tracker1.d_match_detections,tracker1.Max_detection,1,"d_matchdetection.txt");
+        add_new_tracks(tracker1,trackcount,detection_count[0]);
     //}
     //writeDevice2DArrayToFile(tracker1.d_F,tracker1.n,tracker1.n,"dF.txt");
     //writeDevice2DArrayToFile(tracker1.d_Q,tracker1.n,tracker1.n,"dQ.txt");
     //writeDevice2DArrayToFile(tracker1.d_R,tracker1.m-1,tracker1.m-1,"dR.txt");
-    writeDevice2DArrayToFile(tracker1.d_state_predicted,tracker1.n,tracker1.Max_Tracks,"d_prediction.txt");
+    //writeDevice2DArrayToFile(tracker1.d_state_predicted,tracker1.n,tracker1.Max_Tracks,"d_prediction.txt");
 
     //writeDevice2DArrayToFile(tracker1.d_H,tracker1.n,tracker1.m-1,"dH.txt");
-    writeDevice2DArrayToFile(tracker1.d_Z,tracker1.m,tracker1.Max_detection,"d_detection.txt");
+    //writeDevice2DArrayToFile(tracker1.d_Z,tracker1.m,tracker1.Max_detection,"d_detection.txt");
 
-    writeDevice2DArrayToFile(tracker1.d_state_updated,tracker1.n,tracker1.Max_Tracks,"stateTest2.txt");
+    //writeDevice2DArrayToFile(tracker1.d_state_updated,tracker1.n,tracker1.Max_Tracks,"stateTest2.txt");
     //writeDevice2DArrayToFile(tracker1.d_Pcov,tracker1.n*tracker1.Max_Tracks,tracker1.n,"PcovTest.txt");
 
     free_jpeg_from_host(image);
     free_jpeg_from_host(image2);
 
-
-    free_preprocess_mem(d_preprocess_input,d_preprocess_output);
+    cudaFree(d_preprocess_input);
+    cudaFree(d_preprocess_output);
     cudaFree(d_detector_output);
     cudaFree(d_detection_buffer);
     cudaFree(d_class_id);
