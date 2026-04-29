@@ -5,19 +5,13 @@
 #include "include/sort_lib.h"
 #include <cublas_v2.h>
 
-__device__ void CopyTrack(float*d_state_update, float* d_pcov, int* d_age, int* hit_streak,
-                         int n, int trackIDsource, int trackIDdest){
-    for(int i=0;i<n*n;i++){
-
-    }
-}
 
 __global__ void set_first_state_kernel(float* source, float* dest, int N, int start_col, int count){
     //source: 5*N row major, each detection sub element in contiguous
     //[cx,cy,s,r]
     //dest: n*N row major, each state factor in contiguous
     //[cx,cy,s,r,x.,y.,s.]
-    //1 thread for each states
+    //1 thread for each track
     int totalthreads = gridDim.x*blockDim.x;
     int tid = blockIdx.x*blockDim.x+threadIdx.x;
     if(tid>count){return;}
@@ -33,6 +27,29 @@ __global__ void set_first_state_kernel(float* source, float* dest, int N, int st
         dest[col+4*N]=1e-3;   //x.
         dest[col+5*N]=1e-3;   //y.
         dest[col+6*N]=1e-3;   //s.        
+    }
+}
+
+__global__ void set_new_track_state_kernel(float* d_Z, float* d_state, int* d_match_detection,
+                        int N, int*d_totaltracks, int Num_detection){
+    //check the detection match and added unmatched detections as new tracks states
+    //1 thread for each track
+    int totalthreads = gridDim.x*blockDim.x;
+    int tid = blockIdx.x*blockDim.x+threadIdx.x;
+    if(tid>Num_detection){return;}
+    for(int i = tid;i<Num_detection;i+=totalthreads){
+        int match = d_match_detection[i];
+        if(match==-1){
+            int col = atomicAdd(d_totaltracks,1);
+            if (col>=N)return;
+            d_state[col]=d_Z[col];   //cx
+            d_state[col+N]=d_Z[col+N];   //cy
+            d_state[col+2*N]=d_Z[col+2*N];   //s
+            d_state[col+3*N]=d_Z[col+3*N];   //r
+            d_state[col+4*N]=1e-3;   //x.
+            d_state[col+5*N]=1e-3;   //y.
+            d_state[col+6*N]=1e-3;   //s.        
+        }
     }
 }
 
@@ -78,8 +95,10 @@ __global__ void set_first_pcov_kernel(float* dest, int N, int start_matrix_ID, i
     }
 }
 
-__global__ void set_first_age_hit_kernel(int* d_age, int* d_hit_streak, int N, int start_col, int count){
-    //set age = 0 and hit streak = 0 for tracks starting start_col for count 
+__global__ void set_first_age_hit_kernel(int* d_age, int* d_hit_streak, int* d_track_status,
+                                        int N, int start_col, int count){
+    //set age = 0 and hit streak = 1 for tracks starting start_col for count 
+    //set status = 1 for actice but not good
     //1 thread for each track
 
     int totalthreads = gridDim.x*blockDim.x;
@@ -88,7 +107,8 @@ __global__ void set_first_age_hit_kernel(int* d_age, int* d_hit_streak, int N, i
     for(int i = tid;i<count;i+=totalthreads){
         int col = start_col+i;        
         d_age[col]=0;
-        d_hit_streak[col]=0;
+        d_hit_streak[col]=1;
+        d_track_status[col]=1;
     }
 }
 
@@ -123,12 +143,162 @@ __global__ void predict_state(float*d_state_updated, float* state_predicted, int
     }
 }
 
-__global__ void hit_age_delete_kernel(float* d_state_predict, float* d_state_update){
-
+__global__ void track_status_update_kernel(int* d_age, int* d_hit_streak, int* d_track_status,
+                                            int* d_active_count, int* d_good_count, int* d_bad_count,
+                                           int N, int totaltracks){
+    //age> 3 is bad, delete
+    //hit > 3 and age <=3 is active, status =2, display
+    //when 0<hit<=3, status = 1, active but not display or die
+    //1 thread for each track
+    int totalthreads = gridDim.x*blockDim.x;
+    int tid = blockIdx.x*blockDim.x+threadIdx.x;
+    int lane = tid&31;
+    int good_count = 0;
+    int active_count = 0;
+    int bad_count = 0;
+    //use thread 0 to reset global counter
+    if(tid==0){
+        atomicExch(d_active_count, 0);
+        atomicExch(d_good_count, 0);
+        atomicExch(d_bad_count, 0);
+    }
+    //loop thru each track
+    for(int i = tid;i<totaltracks;i+=totalthreads){
+        int age = d_age[i];
+        int hit = d_hit_streak[i];
+        int status = -1;
+        if (age>3){
+            status=0;
+            bad_count+=1;
+        }else{
+            if (hit<=3){
+                status=1;
+                active_count+=1;
+            }else{
+                status=2;
+                good_count+=1;
+            }
+        }
+        d_track_status[i]=status;
+        for (int offset = 16; offset > 0; offset /= 2) {
+            good_count += __shfl_down_sync(0xffffffff, good_count, offset);
+            active_count += __shfl_down_sync(0xffffffff, active_count, offset);
+            bad_count += __shfl_down_sync(0xffffffff, bad_count, offset);
+        }
+        if(lane==0){
+            atomicAdd(d_active_count,active_count);
+            atomicAdd(d_good_count,good_count);
+            atomicAdd(d_bad_count,bad_count);
+        }
+    }
 }
+
+__global__ void update_track_count_kernel(int* d_active_count, int* d_good_count,int* d_totaltracks){
+    int tid = blockIdx.x*blockDim.x+threadIdx.x;
+    if(tid==0){
+        *d_totaltracks=*d_active_count+*d_good_count;
+    }
+}
+
+__global__ void track_output_kernel(float* d_state_update, float*d_state_output, int* d_track_status,int* d_reindex_buffer,
+                            int* d_active_count, int* d_good_count, int* d_bad_count,
+                            int N,int track_count, float scale, float padx, float pady){
+    //process to output buffer and mark down the reindex buffer for future use
+    //1 thread for each track
+    int totalthreads = gridDim.x*blockDim.x;
+    int tid = blockIdx.x*blockDim.x+threadIdx.x;
+    //read the count as offset reference to output buffer
+    //||good tracks.....  || active tracks......                  ||bad tracks.....||
+    //  [0,.good count-1]   [good count,good count+active count]   [good count+active count,good count+active count+bad-1]
+
+    int active_offset = *d_good_count;
+    __syncthreads();
+    //loop thru each track
+    for(int i = tid;i<track_count;i+=totalthreads){
+        int status = d_track_status[i];
+        int index = -1;
+        if (status==2){
+            //grep a slot
+            index = atomicAdd(d_good_count,-1)-1;
+        }else if(status==1){
+            index = atomicAdd(d_active_count,-1)-1+active_offset;
+        }else{
+            index = -1;
+        }
+        d_reindex_buffer[i]=index;
+        //read from states and update the output buffer
+        if(index!=-1){
+            //if not delete state, write to output, convert to original scale
+            float cx = d_state_update[i];
+            float cy = d_state_update[i+N];
+            float s = d_state_update[i+N*2];
+            float r = d_state_update[i+N*3];
+            float w = sqrt(s*r);
+            float h = sqrt(s/r);
+            float x1=cx-w/2;
+            float x2=cx+w/2;
+            float y1=cy-h/2;
+            float y2=cy+h/2;
+
+            d_state_output[index] = (x1-padx)/scale;
+            d_state_output[index+N] = (y1-pady)/scale;
+            d_state_output[index+N*2] = (x2-padx)/scale;
+            d_state_output[index+N*3] = (y2-pady)/scale;
+        }
+    }
+}
+
+__global__ void rearrange_track_to_buffer_kernel(int* d_reindex_buffer,
+    int* d_track_status, float*d_state_updated,int*d_age, int*d_hit,
+    int*d_track_status_buffer,float*d_state_buffer,int*d_age_buffer, int*d_hit_buffer, int N, int n, int totaltracks){
+    //kernel to copy data to buffer, tracks status,update states, updated Pcov, age, hit streak
+    //before rearrange tracks and related data
+    //1 thread for each track
+    int totalthreads = gridDim.x*blockDim.x;
+    int tid = blockIdx.x*blockDim.x+threadIdx.x;
+    if(tid>N)return;
+    for(int i = tid;i<totaltracks;i+=totalthreads){
+        int newindex = d_reindex_buffer[i];
+        if(newindex!=-1){
+            int status = d_track_status[i];
+            int age = d_age[i];
+            int hit = d_hit[i];
+            d_track_status_buffer[newindex]=status;
+            d_age_buffer[newindex]=age;
+            d_hit[newindex]=hit;
+            for(int j=0;j<n;j++){
+                d_state_buffer[j*N+newindex]=d_state_updated[j*N+i];
+            }
+        }
+    }
+}
+
+__global__ void rearrange_Pcov_to_buffer_kernel(int* d_reindex_buffer, float* d_Pcov_update, float* d_Pcov_buffer
+                             ,int N, int n, int totaltracks){
+    //Copy each Pcov_update to buffer
+    //use 1 block for each matrix P
+    int blockid = blockIdx.x;
+	int gridsize = gridDim.x;
+    int blocksize = blockDim.x*blockDim.y;
+    int tid = threadIdx.y*blockDim.x+threadIdx.x;
+	if (blockid >= N) return;
+    //use 1 block for each matrix P
+    //loop to write to P buffer
+    for(int mid = blockid;mid<totaltracks;mid+=gridsize){
+        int newindex = d_reindex_buffer[mid];
+        if(newindex!=-1){
+            for(int j=tid;j<n*n;j+=blocksize){
+                float v = d_Pcov_update[mid*n*n+j];
+                d_Pcov_buffer[newindex*n*n+j]=v;
+            }
+        }
+    }
+}
+
 
 __global__ void ZminusHX(float* d_Z, float*d_HX, int* d_match_track,int* d_age, int* d_hit_streak,
                         int N, int m, int activetracks){
+    //kernel to calculate Z-HX and also check matching status to revise hit and age
     //HX is in d_Y
     //calculate Z-HX
     //both row major order m*N
@@ -140,13 +310,14 @@ __global__ void ZminusHX(float* d_Z, float*d_HX, int* d_match_track,int* d_age, 
         //for each measurement element j in Z at track i
         int matching = d_match_track[i];
         if(matching!=-1){
-            d_hit_streak[i]+=1;
+            d_hit_streak[i]+=1;    //add hit streak
+            d_age[i]=0;            //reset age
             for(int j = 0;j<m;j++){
                 float hx = d_HX[j*N+i];
                 d_HX[j*N+i]=d_Z[j*N+matching]-hx;
             }
         }else{
-            d_age[i]+=1;
+            d_age[i]+=1;   //add age
             for(int j = 0;j<m;j++){
                 d_HX[j*N+i]=0.0;
             }
@@ -171,20 +342,43 @@ __global__ void XplusKy(float* d_state_update,float*d_state_predict,
     }
 }
 
+__global__ void IminusKH(float* d_Pcov_update, float* d_Pcov_buffer ,int N, int n, int batchCount){
+    //calculate I-KH, KH at Pcov_update
+    //use 1 block for each matrix P
+    int blockid = blockIdx.x;
+	int gridsize = gridDim.x;
+    int blocksize = blockDim.x*blockDim.y;
+    int tid = threadIdx.y*blockDim.x+threadIdx.x;
+	if (blockid >= N) return;
+    //use 1 block for each matrix P
+    //loop to write to P
+    for(int mid = blockid;mid<batchCount;mid+=gridsize){
+        for(int j=tid;j<n*n;j+=blocksize){
+            float v = d_Pcov_update[mid*n*n+j];
+            float i = 0.0;
+            if(j%n==j/n){
+                i = 1.0;
+            }
+            d_Pcov_buffer[mid*n*n+j]=i-v;
+        }
+    }
+
+}
+
 void set_first_state(tracker &tracker, int num_current_tracks, int num_added_tracks){
     //wrapper function to set the states for first time added detections
     //check tracker's d_Z array and update to states updated
     //5*N row major to n*N row major
     dim3 dimBlock(256, 1, 1 );
-	dim3 dimGrid(min((num_added_tracks+255)/256,1), 1, 1 );
+	dim3 dimGrid(max((num_added_tracks+255)/256,1), 1, 1 );
     printf("set first state, added tracks: %d\n", num_added_tracks);
 	set_first_state_kernel<<<dimGrid,dimBlock>>>(tracker.d_Z,tracker.d_state_updated,
                                 tracker.Max_detection,num_current_tracks,num_added_tracks);
+	cudaDeviceSynchronize();
     cudaError_t errora = cudaGetLastError();
     if (errora != cudaSuccess){
         printf("setting new state kernel failed: %s\n", cudaGetErrorString(errora));
     }
-	cudaDeviceSynchronize();
 }
 
 void set_first_Pcov(tracker &tracker, int current_tracks, int num_added_tracks){
@@ -192,14 +386,14 @@ void set_first_Pcov(tracker &tracker, int current_tracks, int num_added_tracks){
     //check tracker's d_Z array and update to d_Pcov
     //5*N row major to n*N row major
     dim3 dimBlock(256, 1, 1 );
-	dim3 dimGrid(min((num_added_tracks*tracker.n*tracker.n+255)/256,1), 1, 1 );
+	dim3 dimGrid(max((num_added_tracks*tracker.n*tracker.n+255)/256,1), 1, 1 );
 	set_first_pcov_kernel<<<dimGrid,dimBlock>>>(tracker.d_Pcov,tracker.Max_detection,
                                 current_tracks,num_added_tracks,tracker.n);
+	cudaDeviceSynchronize();
     cudaError_t errora = cudaGetLastError();
     if (errora != cudaSuccess){
         printf("setting new Pcov kernel failed: %s\n", cudaGetErrorString(errora));
     }
-    cudaDeviceSynchronize();
 }
 
 void set_single_F(tracker &tracker){
@@ -222,19 +416,19 @@ void set_single_F(tracker &tracker){
     free(F);
 }
 
-void set_first_age_hit(tracker &tracker, int num_current_tracks, int num_added_tracks){
+void set_first_age_hit_status(tracker &tracker, int num_current_tracks, int num_added_tracks){
     //wrapper function to set the age = 0 for first time added tracks
     //at d_age
     dim3 dimBlock(256, 1, 1 );
-	dim3 dimGrid(min((num_added_tracks+255)/256,1), 1, 1 );
-    printf("set first age=0 and hit streak=0 for added tracks: %d\n", num_added_tracks);
-	set_first_age_hit_kernel<<<dimGrid,dimBlock>>>(tracker.d_age,tracker.d_hit_streak,tracker.Max_detection,
-                                                num_current_tracks,num_added_tracks);
+	dim3 dimGrid(max((num_added_tracks+255)/256,1), 1, 1 );
+    printf("set first age=0 and hit streak=1 status=1 for added tracks: %d\n", num_added_tracks);
+	set_first_age_hit_kernel<<<dimGrid,dimBlock>>>(tracker.d_age,tracker.d_hit_streak,tracker.d_track_status,
+                    tracker.Max_detection,num_current_tracks,num_added_tracks);
+	cudaDeviceSynchronize();
     cudaError_t errora = cudaGetLastError();
     if (errora != cudaSuccess){
         printf("setting new age and hit streak kernel failed: %s\n", cudaGetErrorString(errora));
     }
-	cudaDeviceSynchronize();
 }
 
 void set_single_Q(tracker &tracker){
@@ -304,15 +498,15 @@ void make_state_prediction(tracker &tracker, int num_current_tracks){
     //cudaStreamCreate(&stream_predict_state);
 
     dim3 dimBlock(256, 1, 1 );
-	dim3 dimGrid(min((num_current_tracks+255)/256,1), 1, 1 );
+	dim3 dimGrid(max((num_current_tracks+255)/256,1), 1, 1 );
     printf("set predicted state, num of tracks: %d\n", num_current_tracks);
 	predict_state<<<dimGrid,dimBlock,0>>>(tracker.d_state_updated,tracker.d_state_predicted,
                                 num_current_tracks,tracker.Max_Tracks,tracker.n);
+	cudaDeviceSynchronize();
     cudaError_t errora = cudaGetLastError();
     if (errora != cudaSuccess){
         printf("set predicted state kernel failed: %s\n", cudaGetErrorString(errora));
     }
-    cudaDeviceSynchronize();
 }
 
 void make_cov_prediction(tracker &tracker, int num_current_tracks){
@@ -440,7 +634,7 @@ void update_states_Kalman(tracker &tracker, int num_current_tracks){
     }
     //d_Z-H*x_p
     //and hit streak and age update
-    ZminusHX<<<(totaltracks+255)/256,256>>>(d_Z,d_Y,d_match_track,d_age,d_hit_streak,tracker.Max_Tracks,m,totaltracks);
+    ZminusHX<<<max((totaltracks+255)/256,1),256>>>(d_Z,d_Y,d_match_track,d_age,d_hit_streak,tracker.Max_Tracks,m,totaltracks);
     cudaDeviceSynchronize();
     writeDevice2DArrayToFile(d_Y,m,tracker.Max_Tracks,"d_Y.txt");
     errorb = cudaGetLastError();
@@ -469,7 +663,7 @@ void update_states_Kalman(tracker &tracker, int num_current_tracks){
         printf("CUDA error on K*Y cublas: %s\n", cudaGetErrorString(errorb));
     }
     //d_x+K*Y
-    XplusKy<<<(totaltracks+255)/256,256>>>(d_x_update,d_x_predict,tracker.Max_Tracks,n,totaltracks);
+    XplusKy<<<max((totaltracks+255)/256,1),256>>>(d_x_update,d_x_predict,tracker.Max_Tracks,n,totaltracks);
     cudaDeviceSynchronize();
     writeDevice2DArrayToFile(d_x_update,n,tracker.Max_Tracks,"d_X_update.txt");
     errorb = cudaGetLastError();
@@ -480,11 +674,201 @@ void update_states_Kalman(tracker &tracker, int num_current_tracks){
 
 }
 
-void cleantracks(tracker &tracker, int num_current_tracks){
-    //increase hit streaks for matched tracks
+void update_Pcov(tracker &tracker, int num_current_tracks){
+    //wrapper function to calculate posterior updated covariance with kalman gain for each matched tracks
+    // updated   P       =   (I-        K     *  H   )   *   P
+    //           n*n         n*n       n*m      m*n         n*n
+    //        symmetric   symmetric   col_maj  col_maj    symmetric
+    //use cublas
 
-    //increase age for unmatched tracks
+    float*d_Pcov_predict = tracker.d_Pcov_predict;
+    float*d_Pcov_update = tracker.d_Pcov;
+    float*d_Pcov_buff = tracker.d_Pcov_buffer;
+    float*d_H=tracker.d_H;
+    float*d_K=tracker.d_K;
+    int n=tracker.n;
+    int m=tracker.m-1;
+    int totaltracks = num_current_tracks;
+    const float alpha = 1.0f;
+    const float beta = 0.0f;
+    cublasHandle_t handle;
+    cublasCreate(&handle);
 
-    //check delete threshold and delete
+    //calculate K*H, n*n
+    //result in col major order n*n
+    cublasStatus_t cuA = cublasSgemmStridedBatched(handle, CUBLAS_OP_N, CUBLAS_OP_N,
+                                  n, n, m,
+                                  &alpha,
+                                  d_K, n, n*(m+1),
+                                  d_H, m, 0,
+                                  &beta,
+                                  d_Pcov_update, n, n*n,
+                                  totaltracks);
+    cudaDeviceSynchronize();
+    writeDevice2DArrayToFile(d_Pcov_update,tracker.Max_Tracks,n,"d_KH.txt");
+    if (cuA!=CUBLAS_STATUS_SUCCESS){
+        printf("sgemm error");
+    }
+    cudaError_t errorb = cudaGetLastError();
+    if (errorb != cudaSuccess){
+        printf("CUDA error on KH cublas: %s\n", cudaGetErrorString(errorb));
+    }
+    //caculate (I- K*H), KH at Pcov_update
+    IminusKH<<<max((num_current_tracks+255)/256,1),256>>>(d_Pcov_update,d_Pcov_buff,
+                                            tracker.Max_Tracks,n,num_current_tracks);
+    cudaDeviceSynchronize();
+    writeDevice2DArrayToFile(d_Pcov_buff,tracker.Max_Tracks,n,"d_I-KH.txt");
+    errorb = cudaGetLastError();
+    if (errorb != cudaSuccess){
+        printf("CUDA error on I-KH: %s\n", cudaGetErrorString(errorb));
+    }
+    //calculate (I-KH)*P, n*n
+    cuA = cublasSgemmStridedBatched(handle, CUBLAS_OP_N, CUBLAS_OP_N,
+                                  n, n, n,
+                                  &alpha,
+                                  d_Pcov_buff, n, n*n,
+                                  d_Pcov_predict, n, n*n,
+                                  &beta,
+                                  d_Pcov_update, n, n*n,
+                                  totaltracks);
+    cudaDeviceSynchronize();
+    writeDevice2DArrayToFile(d_Pcov_update,tracker.Max_Tracks,n,"d_Pcov_update.txt");
+    if (cuA!=CUBLAS_STATUS_SUCCESS){
+        printf("sgemm error");
+    }
+    errorb = cudaGetLastError();
+    if (errorb != cudaSuccess){
+        printf("CUDA error on Pcov update cublas: %s\n", cudaGetErrorString(errorb));
+    }
+}
 
+void update_track_status(tracker &tracker, int num_current_tracks){
+    //wrapper to update track status and copy to output buffer
+    dim3 dimBlock(256, 1, 1 );
+	dim3 dimGrid(max((num_current_tracks+255)/256,1), 1, 1 );
+	track_status_update_kernel<<<dimGrid,dimBlock>>>(tracker.d_age,tracker.d_hit_streak,tracker.d_track_status,
+                    tracker.d_active_count,tracker.d_good_count,tracker.d_bad_count,
+                    tracker.Max_detection,num_current_tracks);
+	cudaDeviceSynchronize();
+    cudaError_t errora = cudaGetLastError();
+    if (errora != cudaSuccess){
+        printf("update track status kernel failed: %s\n", cudaGetErrorString(errora));
+    }
+    writeDevice2DArrayToFileINT(tracker.d_track_status,1,tracker.Max_Tracks,"d_trackstatus.txt");
+}
+
+void update_track_count(tracker &tracker){
+    int* d_trackcount = tracker.d_totaltracks;
+    int* d_active_count = tracker.d_active_count;
+    int* d_good_count = tracker.d_good_count;
+    update_track_count_kernel<<<1,1>>>(d_active_count,d_good_count,d_trackcount);
+	cudaDeviceSynchronize();
+    cudaError_t errora = cudaGetLastError();
+    if (errora != cudaSuccess){
+        printf("update device track count kernel failed: %s\n", cudaGetErrorString(errora));
+    }
+    writeDevice2DArrayToFileINT(d_trackcount,1,1,"updated_trackcount");
+}
+
+void update_output_buffer(tracker &tracker,int num_current_tracks, int w_yolo, int h_yolo, int w_orig, int h_orig){
+    //wrapper to update the output buffer according track status and states
+    //and mark the reindex buffer at d_match_track
+
+    float scale = fminf((float)w_yolo/(float)w_orig,(float)h_yolo/(float)h_orig); 
+    float pad_x = ((float)w_yolo-(float)w_orig*scale)/2;
+    float pad_y = ((float)h_yolo-(float)h_orig*scale)/2;
+    std::cout<<"scale: "<<scale<<std::endl;
+    dim3 dimBlock(256, 1, 1 );
+	dim3 dimGrid(max((num_current_tracks+255)/256,1), 1, 1 );
+	track_output_kernel<<<dimGrid,dimBlock>>>(tracker.d_state_updated,tracker.d_state_output,tracker.d_track_status,
+        tracker.d_match_track,tracker.d_active_count,tracker.d_good_count,tracker.d_bad_count,
+        tracker.Max_detection,num_current_tracks, scale, pad_x, pad_y);
+	cudaDeviceSynchronize();
+    cudaError_t errora = cudaGetLastError();
+    if (errora != cudaSuccess){
+        printf("output track status kernel failed: %s\n", cudaGetErrorString(errora));
+    }
+    writeDevice2DArrayToFile(tracker.d_state_output,tracker.n,tracker.Max_Tracks,"d_X_output.txt");
+}
+
+void rearrangetracks(tracker &tracker,int num_current_tracks){
+    //rearrange tracks status,update states, updated Pcov, age, hit streak
+    //and total track count
+    //reindex buffer at d_match_track
+
+    float*d_x_buffer = tracker.d_state_predicted;
+    float*d_x_update = tracker.d_state_updated;
+    float*d_Pcov_buffer = tracker.d_Pcov_buffer;
+    float*d_Pcov_update = tracker.d_Pcov;
+    int* d_reindex_buffer = tracker.d_match_track;
+    int*d_age = tracker.d_age;
+    int*d_hit_streak = tracker.d_hit_streak;
+    int*d_track_status = tracker.d_track_status;
+
+    int* d_track_status_buffer = (int*)tracker.d_IOU;
+    int* d_age_buffer = d_track_status_buffer+tracker.Max_Tracks;
+    int* d_hit_streak_buffer = d_age_buffer+tracker.Max_Tracks;
+    int n=tracker.n;
+    int totaltracks = num_current_tracks;
+    //Copy states age hit status to buffer
+    rearrange_track_to_buffer_kernel<<<max((totaltracks+255)/256,1),256>>>
+    (d_reindex_buffer,d_track_status,d_x_update,d_age,d_hit_streak,
+    d_track_status_buffer,d_x_buffer,d_age_buffer,d_hit_streak_buffer,tracker.Max_Tracks,
+                        n,totaltracks);
+    cudaDeviceSynchronize();
+    cudaError_t errora = cudaGetLastError();
+    if (errora != cudaSuccess){
+        printf("copy tracks to buffer kernek failed: %s\n", cudaGetErrorString(errora));
+    }
+    writeDevice2DArrayToFile(d_x_buffer,7,tracker.Max_Tracks,"d_x_buffer.txt");
+    //copy Pcov to buffer
+    rearrange_Pcov_to_buffer_kernel<<<totaltracks,256>>>(d_reindex_buffer,d_Pcov_update,d_Pcov_buffer,
+        tracker.Max_Tracks,n,totaltracks);
+    cudaDeviceSynchronize();
+    errora = cudaGetLastError();
+    if (errora != cudaSuccess){
+        printf("copy track cov to buffer kernel failed: %s\n", cudaGetErrorString(errora));
+    }
+    writeDevice2DArrayToFile(d_Pcov_buffer,n*totaltracks,n,"d_pcov_buffer.txt");
+    //Copy buffered states back to states
+    //states
+    cudaMemcpy(d_x_update,d_x_buffer,sizeof(float)*n*tracker.Max_Tracks,cudaMemcpyDeviceToDevice);
+    cudaMemcpy(d_Pcov_update,d_Pcov_buffer,sizeof(float)*n*n*totaltracks,cudaMemcpyDeviceToDevice);
+    cudaMemcpy(d_age,d_age_buffer,sizeof(int)*totaltracks,cudaMemcpyDeviceToDevice);
+    cudaMemcpy(d_hit_streak,d_hit_streak_buffer,sizeof(int)*totaltracks,cudaMemcpyDeviceToDevice);
+    cudaMemcpy(d_track_status,d_track_status_buffer,sizeof(int)*totaltracks,cudaMemcpyDeviceToDevice);
+    //writeDevice2DArrayToFile(d_x_update,7,tracker.Max_Tracks,"d_x_updated_copyback.txt");
+    //writeDevice2DArrayToFile(d_Pcov_buffer,n*totaltracks,n,"d_pcov_copyback.txt");
+    //writeDevice2DArrayToFileINT(d_age,totaltracks,1,"d_age_copy.txt");
+    //writeDevice2DArrayToFileINT(d_hit_streak,totaltracks,1,"d_hit.txt");
+    //writeDevice2DArrayToFileINT(d_track_status,totaltracks,1,"d_trackstatus_copyback.txt");
+    
+}
+
+void add_new_tracks(tracker &tracker,int num_current_track, int num_detections){
+    //add unmatched detection as new tracks
+    float*d_Z = tracker.d_Z;
+    float*d_state = tracker.d_state_updated;
+    int* d_match_detection = tracker.d_match_detections;
+    int*d_totaltracks = tracker.d_totaltracks;
+    int new_totaltracks = 0;
+    int n=tracker.n;
+    int N = tracker.Max_Tracks;
+
+    //add state
+    int old_num_tracks = num_current_track;
+    set_new_track_state_kernel<<<max(1,(num_detections+255)/256),256>>>
+    (d_Z,d_state,d_match_detection,N,d_totaltracks,num_detections);
+    cudaDeviceSynchronize();
+    cudaError_t errora = cudaGetLastError();
+    if (errora != cudaSuccess){
+        printf("add new tracks from unmatched detection kernek failed: %s\n", cudaGetErrorString(errora));
+    }
+    cudaMemcpy(&new_totaltracks,d_totaltracks,sizeof(int),cudaMemcpyDeviceToHost);
+    int added_track = new_totaltracks-num_current_track;
+    //set Pcov age,hit,status
+    set_first_Pcov(tracker,old_num_tracks,added_track);
+    set_first_age_hit_status(tracker,old_num_tracks,added_track);
+
+    writeDevice2DArrayToFile(d_state,n,N,"state_after_add_new.txt");
 }
