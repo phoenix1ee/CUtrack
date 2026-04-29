@@ -893,10 +893,6 @@ void hungarian_assignment(tracker &tracker,int width_detections, int height_trac
 		printf("col reduction kernel failed: %s", cudaGetErrorString(error));
 	}
 	//tracks Assignment
-	// number of unassigned tracks
-	int unassigned_tracks = height_tracks;
-	int* d_unassigned_tracks;
-	cudaMalloc((void**)&d_unassigned_tracks,sizeof(int));
 	//build price matrix and detection match
 	initialPriceAndAssignment<<<(width_detections+255)/256,256>>>(d_price,d_match_track,height_tracks,d_match_detection,width_detections);
 	cudaDeviceSynchronize();
