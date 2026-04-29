@@ -31,9 +31,6 @@ __device__ float boxIOUxysr(float acx,float acy,float as,float ar,
     return inter / (as + bs - inter + 1e-6f);
 }
 
-
-__global__ void dummykernel(void){}
-
 __global__ void computeIOUmatrix2(float* d_predictedstate, float* d_detectbox, float* d_IOUmatrix, 
     int Ntracks, int Mdetection,int image_w, int image_h){
     //kernel to compute IOU cost matrix
