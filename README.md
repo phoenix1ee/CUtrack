@@ -1,5 +1,5 @@
 # CUtrack
-A fully CUDA accelerated implementation of Multi-objects tracking using SORT algorithm, with 100% GPU (On device) data pipeline to archieve near to zero host-device data copy and maximum performance on multi-stream and multi objects scenarios
+A fully CUDA accelerated implementation of Multi-objects tracking using SORT algorithm, with 100% GPU (On device) data pipeline to achieve near to zero host-device data copy and maximum performance on multi-stream and multi objects scenarios
 
 
 
