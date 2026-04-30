@@ -280,7 +280,9 @@ void NMS(float* d_raw_detections, int* d_raw_class_id, int Num_raw_detection, in
 //find best class
     dim3 block(256,1,1);
     dim3 grid((Num_raw_detection+255)/256,1,1);
-    Reduce_bestclass<<<grid,block>>>(d_raw_detections,d_buffer_detections,Num_raw_detection,height_raw_detection,d_raw_class_id,0.25);
+    float validthreshold = 0.25;
+    Reduce_bestclass<<<grid,block>>>(d_raw_detections,d_buffer_detections,
+        Num_raw_detection,height_raw_detection,d_raw_class_id,validthreshold);
     cudaDeviceSynchronize();
     cudaError_t errora = cudaGetLastError();
     if (errora != cudaSuccess){
@@ -309,9 +311,10 @@ void NMS(float* d_raw_detections, int* d_raw_class_id, int Num_raw_detection, in
     }
 //suppress duplicate with detection IOU
     //use the raw array as buffer
+    float suppressthreshold = 0.4;
     NMS_refine<<<grid,block>>>(d_buffer_detections,d_raw_detections,
                                 d_buffer_class_id,
-                                Num_raw_detection,height_raw_detection-4,0.4,d_detection_count);
+                                Num_raw_detection,height_raw_detection-4,suppressthreshold,d_detection_count);
     cudaDeviceSynchronize();
     errora = cudaGetLastError();
     if (errora != cudaSuccess){
