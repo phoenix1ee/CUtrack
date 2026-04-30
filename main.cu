@@ -110,7 +110,7 @@ try {
 
     bool first_frame = true;
     int num_frame = 1;
-    while (num_frame<50) {
+    while (true) {
         //copy the frame extracted to pinned memory
         temp_frame.copyTo(pinned_frame);
         // A. Transfer frame to GPU
@@ -126,23 +126,16 @@ try {
         cudaMemcpy(detection_count,d_detection_count,sizeof(int),cudaMemcpyDeviceToHost);
         // copy/convert the detections to tracker's measurement matrix buffer
         copyToTracker(d_detector_output,tracker1.d_Z,Num_raw_detection,detection_count[0]);
-        //writeDevice2DArrayToFile(tracker1.d_Z,4,Max_detection,("d_detection_"+std::to_string(num_frame)+".txt").c_str());
         //calculate states
         printf("frame %d from total: %d display: %d detect: %d\n",num_frame,trackcount,displaycount, detection_count[0]);
         if (first_frame){
             // add the new initial state
             set_first_state(tracker1,0,detection_count[0]);
-            //writeDevice2DArrayToFile(tracker1.d_state_updated,7,Max_Tracks,"d_initial_state_f0.txt");
             set_first_Pcov(tracker1,0,detection_count[0]);
-            //writeDevice2DArrayToFile(tracker1.d_Pcov,7*Max_Tracks,7,"d_initial_Pcov_f0.txt");
             set_first_age_hit_status(tracker1,0,detection_count[0]);
-            //writeDevice2DArrayToFileINT(tracker1.d_age,1,detection_count[0],"d_age.txt");
-            //writeDevice2DArrayToFileINT(tracker1.d_hit_streak,1,detection_count[0],"d_hit.txt");
-            //writeDevice2DArrayToFileINT(tracker1.d_track_status,1,detection_count[0],"d_status.txt");
             cudaMemcpy(d_track_count,d_detection_count,sizeof(int),cudaMemcpyDeviceToDevice);
             trackcount = detection_count[0];
             first_frame = !first_frame;
-            //writeDevice2DArrayToFile(tracker1.d_state_updated,7,Max_Tracks,"d_state.txt");
         }else{  //for each frame after 1st frame
             //prediction
             make_state_prediction(tracker1,trackcount);
@@ -150,50 +143,28 @@ try {
             //compute IOU and cost matrixbetween predicted box and detection
             tracker_compute_IOU(tracker1,trackcount,detection_count[0]);
             //hungarian assignment
-            hungarian_assignment(tracker1,detection_count[0],trackcount);
-        	writeDevice2DArrayToFileINT(tracker1.d_match_track,1,trackcount,("d_matchtrack"+std::to_string(num_frame)+".txt").c_str());
-            //writeDevice2DArrayToFileINT(tracker1.d_match_detections,1,detection_count[0],("d_matchdetection"+std::to_string(num_frame)+".txt").c_str());
+            auction_assignment(tracker1,detection_count[0],trackcount);
             //Calculate Kalman gain for all tracks
             tracker_kalman_gain(&tracker1,trackcount);
             //update the tracks states
             update_states_Kalman(tracker1,trackcount);
-            //writeDevice2DArrayToFile(tracker1.d_state_updated,7,Max_Tracks,("d_state_after_k"+std::to_string(num_frame)+".txt").c_str());
             update_Pcov(tracker1, trackcount);
-            //writeDevice2DArrayToFile(tracker1.d_K,n*Max_Tracks,m,("d_K"+std::to_string(num_frame)+".txt").c_str());
-            //writeDevice2DArrayToFile(tracker1.d_Pcov,7*Max_Tracks,7,("d_Pcov_after_k"+std::to_string(num_frame)+".txt").c_str());
             //update tracks status, hit streak and age of tracks
             //matched->increase hit, Unmatched track→ track age++
             update_track_status(tracker1,trackcount);            
-            //writeDevice2DArrayToFileINT(tracker1.d_totaltracks,1,1,("d_totaltracks_after_update"+std::to_string(num_frame)+".txt").c_str());
-
-            writeDevice2DArrayToFileINT(tracker1.d_age,1,trackcount,("d_age_just_status_updated"+std::to_string(num_frame)+".txt").c_str());
-            //writeDevice2DArrayToFileINT(tracker1.d_hit_streak,1,Max_Tracks,("d_hit"+std::to_string(num_frame)+".txt").c_str());
-            //writeDevice2DArrayToFileINT(tracker1.d_track_status,1,trackcount,("d_status"+std::to_string(num_frame)+".txt").c_str());
             //update device total active track count for status 1 and 2 tracks
             update_track_count(tracker1);
-            //writeDevice2DArrayToFileINT(tracker1.d_totaltracks,1,1,("d_totaltracks_after_count"+std::to_string(num_frame)+".txt").c_str());
-            //writeDevice2DArrayToFileINT(tracker1.d_active_count,1,1,("d_activecount_after_count"+std::to_string(num_frame)+".txt").c_str());
-            //writeDevice2DArrayToFileINT(tracker1.d_good_count,1,1,("d_goodcount_after_count"+std::to_string(num_frame)+".txt").c_str());
 
             //prepare output confirmed tracks
             update_output_buffer(tracker1,trackcount,out_width,out_height,width,height);
-            //writeDevice2DArrayToFileINT(tracker1.d_match_track,1,trackcount,("d_reindex"+std::to_string(num_frame)+".txt").c_str());
             //cleanup
             rearrangetracks(tracker1, trackcount,num_frame);
-            //writeDevice2DArrayToFile(tracker1.d_state_updated,7,Max_Tracks,("d_state_after_rearrange"+std::to_string(num_frame)+".txt").c_str());
-            //writeDevice2DArrayToFile(tracker1.d_Pcov,7*Max_Tracks,7,("d_Pcov_after_rearrange"+std::to_string(num_frame)+".txt").c_str());
-            //writeDevice2DArrayToFileINT(tracker1.d_totaltracks,1,1,("d_totaltracks_after_rearrange"+std::to_string(num_frame)+".txt").c_str());
-            //writeDevice2DArrayToFileINT(tracker1.d_hit_streak,1,Max_Tracks,("d_hit_after_rearrange"+std::to_string(num_frame)+".txt").c_str());
 
             //Create new tracks for unmatched detections
             //use new track counts after delete on device, and added new track to the back, update trackcount
             add_new_tracks(tracker1,detection_count[0]);
-            //writeDevice2DArrayToFileINT(tracker1.d_totaltracks,1,1,("d_totaltracks_after_add_new"+std::to_string(num_frame)+".txt").c_str());
-            //writeDevice2DArrayToFile(tracker1.d_state_updated,7,Max_Tracks,("d_state_final"+std::to_string(num_frame)+".txt").c_str());
             cudaMemcpy(&trackcount,d_track_count,sizeof(int),cudaMemcpyDeviceToHost);
             cudaMemcpy(&displaycount,d_displaycount,sizeof(int),cudaMemcpyDeviceToHost);
-            writeDevice2DArrayToFileINT(tracker1.d_age,1,trackcount,("d_age_final"+std::to_string(num_frame)+".txt").c_str());
-            writeDevice2DArrayToFileINT(tracker1.d_hit_streak,1,trackcount,("d_hit_final"+std::to_string(num_frame)+".txt").c_str());
         }
         printf("become total: %d display: %d \n",trackcount,displaycount);
         // C. Transfer ONLY the results of detection box back
