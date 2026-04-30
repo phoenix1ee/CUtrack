@@ -61,15 +61,7 @@ __global__ void set_first_pcov_kernel(float* dest, int N, int start_matrix_ID, i
     int matrixsize = matrix_dim*matrix_dim;
     __shared__ float defaultvalue[7];
     if(blockIdx.x==0 && threadIdx.x==0){
-        /*
-        defaultvalue[0]=1.0;
-        defaultvalue[1]=1.0;
-        defaultvalue[2]=1.0;
-        defaultvalue[3]=0.01;
-        defaultvalue[4]=10.0;
-        defaultvalue[5]=10.0;
-        defaultvalue[6]=1.0;
-        */
+
         defaultvalue[0]=10.0;
         defaultvalue[1]=10.0;
         defaultvalue[2]=10.0;
