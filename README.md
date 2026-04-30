@@ -6,106 +6,79 @@ A fully CUDA accelerated implementation of Multi-objects tracking using SORT alg
 ## Algorithm Design
 This tracker combine several core ideas:
 1. Use YOLO as detector for inference and keep flexibility to swap to other models, e.g. neural network/ML driven
-2. Use Hungarian Algorithm for matching
+2. Use Auction Algorithm for matching of tracks and detections
 3. Use a customised tracker object to allow runtime vector size declaration to support different state/measurement combination for compatibility with all scenarios other than object tracking in fixed frame, but also 2D/3D world, linearize/non-linearize robots kinematic models
 4. Use a 100% on device data pipeline to allow for maximum efficiency, parallelism and scalability
-5. Use of custom kernels for beyond CUDA library performance
+5. Combination of custom kernels and CUBLAS, CUSOLVER library for maximum performance and flexibility
 
-## Progress
-Major parts:
-1. Input stream/extract tensor (Pending)
-2. Frame Pre-processing (Done)
-3. Tracker initialization (Done)
-4. Detection with ONNX runtime and YOLO(Done)
-5. State Estimation with Kalman filter (Pending)
-6. Computing IOU (Done)
-7. Matching of tracks and detection using Hungarian Algorithm (partially done)
-8. Update of tracks with Kalman filter (partially done)
+## Framework involved
+### OpenCV
+-for extract of frame data from video stream and output display
+### ONNX runtime
+-for running yolo detection models
+### CUDA libraries
+-CUBLAS for batched matrix processing
+-CUSOLVER for Cholesky Factorization and solving linear system for Kalman Gain
+
+## Major Components
+1. Input stream/extract tensor with OpenCV
+2. Frame Pre-processing
+3. Tracker initialization
+4. Detection with ONNX runtime and YOLO
+4. NMS post-processing to suppress ghost/duplicate detections
+5. State Estimation
+6. Computing IOU
+7. Matching of tracks and detections using Auction Algorithm
+8. Update and correction of tracks with Kalman filter
+9. Output and Display with OpenCV for demonstration
 
 ## Project Folder Structure
 
 ```
 project_root/
 ├── include/                       # Public headers
-│   ├── third_party/               # folder of third party library
-|   |   └── stb_image.h            # library to handle jpeg file I/O for testing
-|   |                                from https://github.com/nothings/stb.git
-│   ├── helper.h                   # header of helper function
-│   ├── hungarian_cpu_vectorized.h # header of a AVX accelerated CPU function for benchmarking purpose
-│   ├── inference.h                # header of a wrapper class for ONNX runtime
-│   └── sort_lib.h                 # main header of all SORT related kernel wrapper functions
-├── test_detection/                # folder for test of using YOLO with onnx runtime for detection
-│   ├── test_detection.cu          # test file
-│   ├── test_detection2.cu         # test file with onnx wrapper class
-│   ├── test_input.JPG             # sample JPG for test
-│   └── Makefile                   #
-├── test_hungarian_algo/           # folder for test of hungarian algorithm function
-│   ├── test_hungarian_algo.cu     # test file
-│   └── Makefile                   #
-├── test_image_preprocess/         # folder for test of image preprocessing for YOLO model
-│   ├── stb_image.h                # library for importing JPEG for test only
-│   ├── test_image_preprocess.cu   # test file
-│   ├── test_input.JPG             # sample JPG for test
-│   └── Makefile                   #
-├── test_IOU/                      # folder for test of IOU matrix calculation
-│   ├── test_IOU.cu                # test file
-│   └── Makefile                   #
-├── test_kalman_filter/            # folder for test of kalman filter calculation
-│   ├── test_kalman_filter.cu      # test file
-│   └── Makefile                   #
-├── test_tracker/                  # folder for test of tracker class
-│   ├── test_tracker.cu            # test file
-│   └── Makefile                   #
+│   ├── helper.h                   # header file of helper functions
+│   ├── hungarian_cpu_vectorized.h # header file of a AVX accelerated CPU function for benchmarking purpose
+│   ├── inference.h                # header file of a wrapper class for ONNX runtime
+│   └── sort_lib.h                 # main header file of all SORT related kernel wrapper functions
 ├── ExportYOLOmodel.py             # python script to export YOLO model
 ├── hungarian_cpu_vectorized.cpp   # cpu vectorized function of row and column min reduction
-├── hungarian_lib.cu               # library for hungarian algorithm
+├── auctionAlgo_lib.cu             # library for auction algorithm
 ├── input_lib.cu                   # library for handling input
 ├── IOU_lib.cu                     # library for IOU matrix calculation
 ├── kalman_filter_lib.cu           # library for Kalman filter
 ├── preprocess_lib.cu              # library for preprocessing
 ├── main.cu                        # main file, pending, with initialization test only
+├── duck.mp4                       # a funny demo video for testing
 ├── Makefile                       #
 ├── README.md                      #
 
 ```
-## Available Test
-1. Test of image pre-process
 
-2. Test of hungarian algorithm
+## Download and test:
 
-3. Test of IOU computation
+### Pre-requisite before make and run
 
-4. Test of Kalman filter
+1.ONNX runtime
+2.OpenCV libraries
+3.CUDA
 
-5. Test of ONNX runtime with YOLO model
-
-## How to download and run:
+The project is developed and tested with Cuda 11.8 (My hardware is older), ONNX 1.18 and OpenCV 4.12. Make sure you have all the libraries in machine and have the path included in system variables. If running windows, in my case, you need to have the ONNX runtime dll files:\
+-onnxruntime_providers_cuda.dll\
+-onnxruntime_providers_shared.dll\
+-onnxruntime.dll \
+under the project root because windows 11 has a built-in ONNX runtime of 1.17 that cause version conflicts when compiling.
 
 1. Clone the repo
-2. Navigate to test folders with test_*, e.g. test_IOU
-3. Run make command and run the executable
+2. Navigate to project root folder
+3. run python script to export the model files(.onnx and .pt) to project root or you prepare your own models
+4. revise the makefile with your own ONNX and OpenCV path
+3. Run make command to compile and run the executable
 
 
 ### Instruction to Run:
 
 ```commandline
-#test the image pre-process, under test_image_preprocess/
 >>make
->>./preprocesstest.exe ./test_input.JPG
-
-#test the hungarian algorithm, under test_hungarian_algo/
->>make
->>./test_hungarian_algo.exe
-
-#test the IOU function, under test_IOU/
->>make
->>./testIOU.exe
-
-#test the Kalman filter, under test_kalman_filter/
->>make
->>./kalman_filter.exe, under project_root/
-
-#test the ONNX runtime, under test_detection/
->>make
->>./test_detection2.exe .\test_input.JPG
+>>./main.exe ./duck.mp4
 ```
