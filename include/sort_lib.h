@@ -17,8 +17,9 @@ typedef struct tracker{
     int* d_active_count;   //buffer to count active tracks      1
     int* d_bad_count;        //buffer to count bad tracks       1
 
-    int* d_totaltracks;    //buffer to store current track count    1
-    int* d_totaldetections;  //buffer to store current detection count    1
+    int* d_totaltracks;    //buffer to store number of total good and active track count    1
+    int* d_totaldetections;  //buffer to store number of current detection count    1
+    int* d_goodtracks;     //buffer to store number of good track count for display   1
 
     float * d_state_predicted;    //state variables   n*N
     float * d_state_updated;    //state variables   n*N
@@ -86,6 +87,7 @@ typedef struct tracker{
         
         d_totaltracks=d_good_count+3;
         d_totaldetections=d_good_count+4;
+        d_goodtracks=d_good_count+5;
 
         cudaMalloc((void**)&d_base,total);
         size_t offset = 0;
@@ -182,6 +184,7 @@ typedef struct tracker{
         cudaFree(d_base);   
         cudaFree(d_each_K);
         cudaFree(d_each_S);
+        cudaFree(d_good_count);
     }
 
 }tracker;
@@ -202,7 +205,8 @@ void free_jpeg_from_host(ImageData image);
 //wrapper function and helper function-image processing for onnx runtime
 __device__ float boxIOU(float acx,float acy,float aw,float ah,
                         float bcx,float bcy,float bw,float bh);
-void frame_preprocess(uint8_t* d_frame_in,float* d_frame_out,int h_in, int w_in, int h_out, int w_out);
+void frame_preprocess(uint8_t* d_frame_in,float* d_frame_out,
+                        int h_in, int w_in, int h_out, int w_out, cudaStream_t*stream=nullptr);
 
 //wrapper function-post processing after detections
 void NMS(float* d_raw_detections, int* d_raw_class_id, int Num_raw_detection, int height_raw_detection, 
@@ -224,8 +228,8 @@ void update_Pcov(tracker &tracker, int num_current_tracks);
 void update_track_status(tracker &tracker, int num_current_tracks);
 void update_output_buffer(tracker &tracker,int num_current_tracks, int w_yolo, int h_yolo, int w_orig, int h_orig);
 void update_track_count(tracker &tracker);
-void rearrangetracks(tracker &tracker,int num_current_tracks);
-void add_new_tracks(tracker &tracker,int num_current_track, int num_detections);
+void rearrangetracks(tracker &tracker,int num_current_tracks,int num_frame);
+void add_new_tracks(tracker &tracker, int num_detections);
 
 //wrapper function for IOU calculation
 void tracker_compute_IOU(tracker &tracker, int activetrack, int activedetection);
@@ -239,8 +243,8 @@ void predict_positions(float* d_F, float* d_x, int num_objects);
 void kalman_gain_batch(bool*inactive, float* d_S, float*d_PHT, float*d_P,float*d_H,float*d_R,int totaltracks, int m, int n);
 void tracker_kalman_gain(tracker* trackerA, int totaltracks);
 
-//wrapper function that calls the GPU kernel for hungarian algorithm(different design)
-void hungarian_assignment(tracker &tracker,int width_detections, int height_tracks);
+//wrapper function that calls the GPU kernel for auction Algorithm/hungarian algorithm(different design)
+void auction_assignment(tracker &tracker,int width_detections, int height_tracks);
 void transposeArray(float *d_a,float *d_b,int matrixwidth, int matrixheight);
 void reductionStreamMemory(float* input, int totalsize, int blocksize, int width, int height);
 void reductionmappedmem(float* input, int totalsize, int blocksize, int width, int height);
