@@ -5,7 +5,6 @@
 #include "include/sort_lib.h"
 #include <cublas_v2.h>
 
-
 __global__ void set_first_state_kernel(float* source, float* dest, int N, int start_col, int count){
     //source: 5*N row major, each detection sub element in contiguous
     //[cx,cy,s,r]
