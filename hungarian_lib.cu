@@ -21,7 +21,7 @@ __global__ void updateValueAndBid(float* d_IOU, float* d_bid, float* d_price, in
 								int* d_track_assignment, 
 								int activeTracks, int detections){
 	//calculate the value and calculate bid(write to price)
-	//reach block handle 1 track
+	//each block handle 1 track
 	//each thread handle 1 detection
 	float ep = 1.0f/activeTracks;
 	//support up to 8192 blocksize / detections ~ yolo max, and unlikely
@@ -40,8 +40,8 @@ __global__ void updateValueAndBid(float* d_IOU, float* d_bid, float* d_price, in
 	//if(tid>detections){return;}
 	if(blockIdx.x>=activeTracks)return;
 	for(int i = blockIdx.x;i<activeTracks;i+=totalblocks){
-		if (d_track_assignment[i] != -1) return; // tracks with already assigned detections, don't bid!
-		if(blockIdx.x==0 && tid<256){
+		if (d_track_assignment[i] != -1) continue; // tracks with already assigned detections, don't bid!
+		if(tid<256){
 			sharedmax[tid]=0.0;
 			sharedmax2[tid]=0.0;
 			sharedID[tid]=-1;
@@ -167,9 +167,9 @@ __global__ void initialPriceAndAssignment(float* d_price, int*d_match_track, int
     int tid = blockIdx.x*blocksize+threadIdx.y*blockDim.x+threadIdx.x;
     for(int i = tid;i<detections;i+=totalthreads){
 		if(i>=detections)return;
-    	d_price[tid] = 0.0;
-		d_match_detection[tid] = -1;
-		d_match_track[tid] = -1;
+    	d_price[i] = 0.0;
+		d_match_detection[i] = -1;
+		d_match_track[i] = -1;
 	}
 }
 
@@ -906,6 +906,9 @@ void hungarian_assignment(tracker &tracker,int width_detections, int height_trac
 	bool* d_any_changes;
 	cudaMalloc((void**)&d_any_changes,sizeof(bool));
 	while(h_any_changes && itr<max_itr){
+		cudaMemset(d_bid, 0, sizeof(float)*tracker.Max_detection*tracker.Max_Tracks);
+		cudaMemset(d_bid_target, 0, sizeof(int)*tracker.Max_Tracks);
+		
 		//calculate bid
 		updateValueAndBid<<<height_tracks,256>>>(d_IOU,d_bid,d_price,d_bid_target,d_match_track,height_tracks,width_detections);
 		cudaDeviceSynchronize();
@@ -927,5 +930,4 @@ void hungarian_assignment(tracker &tracker,int width_detections, int height_trac
 		cudaMemcpy(&h_any_changes, d_any_changes, sizeof(bool), cudaMemcpyDeviceToHost);
 		itr++;
 	}
-	
 }

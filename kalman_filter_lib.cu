@@ -524,7 +524,7 @@ void tracker_kalman_gain(tracker* trackerA, int totaltracks){
                         totaltracks);    
     cudaDeviceSynchronize();
     //d_PHT now contains kalman gain matrix n*m.
-    writeDevice2DArrayToFile(d_PHT,m,n,"d_K.txt");
+    //writeDevice2DArrayToFile(d_PHT,m,n,"d_K.txt");
 
     cublasDestroy(handle);
     }
