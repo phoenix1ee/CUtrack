@@ -6,12 +6,12 @@ A fully CUDA accelerated implementation of Multi-objects tracking using SORT alg
 ## Algorithm Design
 This tracker combine several core ideas:
 1. Use YOLO as detector for inference and keep flexibility to swap to other models, e.g. neural network/ML driven
-2. Use Auction Algorithm for matching of tracks and detections
-3. Use a customised tracker object to allow runtime vector size declaration to support different state/measurement combination for compatibility with all scenarios other than object tracking in fixed frame, but also 2D/3D world, linearize/non-linearize robots kinematic models
+2. Use Auction Algorithm for matching tracks and detections
+3. Use a customized tracker object to allow runtime vector size declaration to support different state/measurement combinations for compatibility with all scenarios other than object tracking in fixed frame, but also 2D/3D world, linearize/non-linearize robots kinematic models
 4. Use a 100% on device data pipeline to allow for maximum efficiency, parallelism and scalability
 5. Combination of custom kernels and CUBLAS, CUSOLVER library for maximum performance and flexibility
 
-## Framework involved
+## Frameworks and CUDA libraries used
 ### OpenCV
 -for extract of frame data from video stream and output display
 ### ONNX runtime
@@ -28,7 +28,7 @@ This tracker combine several core ideas:
 4. NMS post-processing to suppress ghost/duplicate detections
 5. State Estimation
 6. Computing IOU
-7. Matching of tracks and detections using Auction Algorithm
+7. Matching tracks and detections using Auction Algorithm
 8. Update and correction of tracks with Kalman filter
 9. Output and Display with OpenCV for demonstration
 
