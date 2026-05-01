@@ -59,8 +59,8 @@ project_root/
 
 ### Pre-requisite before make and run
 
-1.ONNX runtime
-2.OpenCV libraries
+1.ONNX runtime\
+2.OpenCV libraries\
 3.CUDA
 
 The project is developed and tested with Cuda 11.8 (My hardware is older), ONNX 1.18 and OpenCV 4.12. Make sure you have all the libraries in machine and have the path included in system variables. If running windows, in my case, you need to have the ONNX runtime dll files:\
