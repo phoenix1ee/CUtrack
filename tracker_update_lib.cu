@@ -655,6 +655,7 @@ void update_states_Kalman(tracker &tracker, int num_current_tracks){
         printf("CUDA error on X_update kernel: %s\n", cudaGetErrorString(errorb));
     }
 
+    cublasDestroy(handle);
 
 }
 
@@ -723,6 +724,8 @@ void update_Pcov(tracker &tracker, int num_current_tracks){
     if (errorb != cudaSuccess){
         printf("CUDA error on Pcov update cublas: %s\n", cudaGetErrorString(errorb));
     }
+
+    cublasDestroy(handle);
 }
 
 void update_track_status(tracker &tracker, int num_current_tracks){

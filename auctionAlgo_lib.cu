@@ -922,4 +922,5 @@ void auction_assignment(tracker &tracker,int width_detections, int height_tracks
 		cudaMemcpy(&h_any_changes, d_any_changes, sizeof(bool), cudaMemcpyDeviceToHost);
 		itr++;
 	}
+	cudaFree(d_any_changes);
 }
