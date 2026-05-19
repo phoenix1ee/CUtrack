@@ -5,6 +5,8 @@
 #include "include/helper.h"
 #include "include/sort_lib.h"
 #include "include/inference.h"
+#include <cublas_v2.h>
+#include <cusolverDn.h>
 #include <opencv2/opencv.hpp>
 #include <onnxruntime_cxx_api.h>
 
@@ -49,9 +51,6 @@ try {
     int width  = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH));
     int height = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT));
 
-
-
-    //std::cout<<"video width:"<<width<<" height: "<<height<<std::endl;
     // memory for the captured frame
     cv::Mat temp_frame;
     cap.read(temp_frame);  //read 1 frame
@@ -108,6 +107,12 @@ try {
     //cudaStream_t stream;
     //cudaStreamCreate(&stream);
 
+    //preset handle for cublas and cusolver
+    cublasHandle_t cublas_handle;
+    cublasCreate(&cublas_handle);
+    cusolverDnHandle_t solver_handle = NULL;
+    cusolverDnCreate(&solver_handle);
+
     bool first_frame = true;
     int num_frame = 1;
     while (true) {
@@ -145,7 +150,7 @@ try {
             //hungarian assignment
             auction_assignment(tracker1,detection_count[0],trackcount);
             //Calculate Kalman gain for all tracks
-            tracker_kalman_gain(&tracker1,trackcount);
+            tracker_kalman_gain(&tracker1,trackcount,cublas_handle,solver_handle);
             //update the tracks states
             update_states_Kalman(tracker1,trackcount);
             update_Pcov(tracker1, trackcount);
@@ -203,6 +208,8 @@ try {
     }
 
     // Cleanup...
+    cusolverDnDestroy(solver_handle);
+    cublasDestroy(cublas_handle);
     cudaFreeHost(h_pinned_ptr);
     cudaHostUnregister(h_box_buffer);
     free(h_box_buffer);

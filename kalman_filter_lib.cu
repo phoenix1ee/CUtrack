@@ -386,7 +386,7 @@ void kalman_gain_batch(bool*inactive, float* d_S, float*d_PHT, float*d_P,float*d
 
     }
 
-void tracker_kalman_gain(tracker* trackerA, int totaltracks){
+void tracker_kalman_gain(tracker* trackerA, int totaltracks, cublasHandle_t handle, cusolverDnHandle_t k_handle){
     //for use with custom Struct Tracker
     float*d_S = trackerA->d_S; //strided between d_S is m=5*m=5
 
@@ -411,8 +411,8 @@ void tracker_kalman_gain(tracker* trackerA, int totaltracks){
     const float alpha = 1.0f;
     const float beta = 0.0f;
 
-    cublasHandle_t handle;
-    cublasCreate(&handle);
+    //cublasHandle_t handle;
+    //cublasCreate(&handle);
 
     //calculate PH^T, n*m
     cublasStatus_t cuA = cublasSgemmStridedBatched(handle, CUBLAS_OP_N, CUBLAS_OP_T,
@@ -455,10 +455,10 @@ void tracker_kalman_gain(tracker* trackerA, int totaltracks){
     }
     //writeDevice2DArrayToFile(d_S,m,m,"d_S.txt");
 
-    cusolverDnHandle_t k_handle = NULL;
+    //cusolverDnHandle_t k_handle = NULL;
     //cusolverStatus_t cusolver_status;
 
-    cusolverDnCreate(&k_handle);
+    //cusolverDnCreate(&k_handle);
 
     //find out pointers to each matrix S and PHT for batch operations
     float** d_each_d_PHT = trackerA->d_each_K;
@@ -498,7 +498,7 @@ void tracker_kalman_gain(tracker* trackerA, int totaltracks){
         }
     }
     free(info);
-    cusolverDnDestroy(k_handle);
+    //cusolverDnDestroy(k_handle);
     
     // Solve for K:  K * (L*L^T) = (PH^T)   /    KS = (PH^T)
     // S is symmetric, tell solver to use lower half
@@ -526,5 +526,5 @@ void tracker_kalman_gain(tracker* trackerA, int totaltracks){
     //d_PHT now contains kalman gain matrix n*m.
     //writeDevice2DArrayToFile(d_PHT,m,n,"d_K.txt");
 
-    cublasDestroy(handle);
+    //cublasDestroy(handle);
     }

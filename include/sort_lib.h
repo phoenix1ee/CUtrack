@@ -2,7 +2,8 @@
 #define sort_lib_h
 
 #include <cuda_runtime.h>
-
+#include <cublas_v2.h>
+#include <cusolverDn.h>
 #include <string>
 
 //tracker struct wrapper
@@ -241,7 +242,8 @@ void cublasmmulti(float* d_A, float* d_B, float* d_C, bool A_T, bool B_T, int m,
 void kalman_gain_single(float* d_K, float*d_P,float*d_H,float*d_R,int m, int n);
 void predict_positions(float* d_F, float* d_x, int num_objects);
 void kalman_gain_batch(bool*inactive, float* d_S, float*d_PHT, float*d_P,float*d_H,float*d_R,int totaltracks, int m, int n);
-void tracker_kalman_gain(tracker* trackerA, int totaltracks);
+//void tracker_kalman_gain(tracker* trackerA, int totaltracks);
+void tracker_kalman_gain(tracker* trackerA, int totaltracks, cublasHandle_t handle, cusolverDnHandle_t k_handle);
 
 //wrapper function that calls the GPU kernel for auction Algorithm/hungarian algorithm(different design)
 void auction_assignment(tracker &tracker,int width_detections, int height_tracks);
