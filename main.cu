@@ -145,10 +145,12 @@ try {
             //prediction
             make_state_prediction(tracker1,trackcount);
             make_cov_prediction(tracker1,trackcount);
-            //compute IOU and cost matrixbetween predicted box and detection
-            tracker_compute_IOU(tracker1,trackcount,detection_count[0]);
-            //hungarian assignment
-            auction_assignment(tracker1,detection_count[0],trackcount);
+            if (detection_count[0]>0){
+                //compute IOU and cost matrixbetween predicted box and detection
+                tracker_compute_IOU(tracker1,trackcount,detection_count[0]);
+                //hungarian assignment
+                auction_assignment(tracker1,detection_count[0],trackcount);
+            }
             //Calculate Kalman gain for all tracks
             tracker_kalman_gain(&tracker1,trackcount,cublas_handle,solver_handle);
             //update the tracks states
