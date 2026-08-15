@@ -236,29 +236,10 @@ void add_new_tracks(tracker &tracker, int num_detections);
 void tracker_compute_IOU(tracker &tracker, int activetrack, int activedetection);
 
 //wrapper function that calls GPU kernels / library for Kalman filter
-void cublasTranspose_simple(float* d_in, float* d_out, int o_row, int o_col);
-void cublasadd_simple(float* d_A, float* d_B, int n);
-void cublasmmulti(float* d_A, float* d_B, float* d_C, bool A_T, bool B_T, int m, int n, int k);
-void kalman_gain_single(float* d_K, float*d_P,float*d_H,float*d_R,int m, int n);
-void predict_positions(float* d_F, float* d_x, int num_objects);
-void kalman_gain_batch(bool*inactive, float* d_S, float*d_PHT, float*d_P,float*d_H,float*d_R,int totaltracks, int m, int n);
-//void tracker_kalman_gain(tracker* trackerA, int totaltracks);
 void tracker_kalman_gain(tracker* trackerA, int totaltracks, cublasHandle_t handle, cusolverDnHandle_t k_handle);
 
 //wrapper function that calls the GPU kernel for auction Algorithm/hungarian algorithm(different design)
 void auction_assignment(tracker &tracker,int width_detections, int height_tracks);
-void transposeArray(float *d_a,float *d_b,int matrixwidth, int matrixheight);
-void reductionStreamMemory(float* input, int totalsize, int blocksize, int width, int height);
-void reductionmappedmem(float* input, int totalsize, int blocksize, int width, int height);
-void reductionglobalmem(float* input, int totalsize, int blocksize, int width, int height);
-void reductionNoTransposeStreamMemory(float* input, int totalsize, int blocksize, int width, int height);
-void reductionNotranspose(float* input, int totalsize, int blocksize, int width, int height);
-
-// If you want to use a __device__ function across files, use 'extern'
-// Note: This requires -rdc=true during compilation
-// extern __device__ float GPU_Helper_Math(float x);
-
-
 
 
 #endif
