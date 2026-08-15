@@ -113,6 +113,9 @@ try {
     cusolverDnHandle_t solver_handle = NULL;
     cusolverDnCreate(&solver_handle);
 
+    struct timespec start;
+	getstarttime(&start);
+
     bool first_frame = true;
     int num_frame = 1;
     while (true) {
@@ -132,7 +135,7 @@ try {
         // copy/convert the detections to tracker's measurement matrix buffer
         copyToTracker(d_detector_output,tracker1.d_Z,Num_raw_detection,detection_count[0]);
         //calculate states
-        printf("frame %d from total: %d display: %d detect: %d\n",num_frame,trackcount,displaycount, detection_count[0]);
+        //printf("frame %d from total: %d display: %d detect: %d\n",num_frame,trackcount,displaycount, detection_count[0]);
         if (first_frame){
             // add the new initial state
             set_first_state(tracker1,0,detection_count[0]);
@@ -144,7 +147,7 @@ try {
         }else{  //for each frame after 1st frame
             //prediction
             make_state_prediction(tracker1,trackcount);
-            make_cov_prediction(tracker1,trackcount);
+            make_cov_prediction(tracker1,trackcount,cublas_handle);
             if (detection_count[0]>0){
                 //compute IOU and cost matrixbetween predicted box and detection
                 tracker_compute_IOU(tracker1,trackcount,detection_count[0]);
@@ -154,8 +157,8 @@ try {
             //Calculate Kalman gain for all tracks
             tracker_kalman_gain(&tracker1,trackcount,cublas_handle,solver_handle);
             //update the tracks states
-            update_states_Kalman(tracker1,trackcount);
-            update_Pcov(tracker1, trackcount);
+            update_states_Kalman(tracker1,trackcount,cublas_handle);
+            update_Pcov(tracker1, trackcount,cublas_handle);
             //update tracks status, hit streak and age of tracks
             //matched->increase hit, Unmatched track→ track age++
             update_track_status(tracker1,trackcount);            
@@ -173,7 +176,7 @@ try {
             cudaMemcpy(&trackcount,d_track_count,sizeof(int),cudaMemcpyDeviceToHost);
             cudaMemcpy(&displaycount,d_displaycount,sizeof(int),cudaMemcpyDeviceToHost);
         }
-        printf("become total: %d display: %d \n",trackcount,displaycount);
+        //printf("become total: %d display: %d \n",trackcount,displaycount);
         // C. Transfer ONLY the results of detection box back
         // need to modify the output from tracker before transfer because states are [cx,cy,s,r]
         cudaMemcpy(h_box_buffer, d_output_buffer, sizeof(float)*4*Max_Tracks, cudaMemcpyDeviceToHost);
@@ -208,6 +211,10 @@ try {
         if (temp_frame.empty()) break;
         num_frame++;
     }
+    printf("total frames: %d\n",num_frame);
+    uint64_t consumed = get_lapsed(start);
+	printf("used time: %" PRIu64 "\n",consumed);
+
 
     // Cleanup...
     cusolverDnDestroy(solver_handle);

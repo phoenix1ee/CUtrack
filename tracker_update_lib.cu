@@ -196,7 +196,7 @@ __global__ void update_track_count_kernel(int* d_active_count, int* d_good_count
         *d_totaltracks=*d_active_count+*d_good_count;
         *d_goodtracks = *d_good_count;
     }
-    printf("\ntotal active tracks: %d\n", *d_totaltracks);
+    //printf("\ntotal active tracks: %d\n", *d_totaltracks);
 }
 
 __global__ void track_output_kernel(float* d_state_update, float*d_state_output, int* d_track_status,int* d_reindex_buffer,
@@ -504,7 +504,7 @@ void make_state_prediction(tracker &tracker, int num_current_tracks){
     }
 }
 
-void make_cov_prediction(tracker &tracker, int num_current_tracks){
+void make_cov_prediction(tracker &tracker, int num_current_tracks, cublasHandle_t handle){
     //wrapper function to do predicted states and covariance
     //use the cov matrix in d_Pcov and d_F matrix to make predictions on d_Pcov_predict
     //current implementation use n=7
@@ -527,8 +527,8 @@ void make_cov_prediction(tracker &tracker, int num_current_tracks){
     //cudaStream_t stream;
     //cudaStreamCreate(&stream);
 
-    cublasHandle_t handle;
-    cublasCreate(&handle);
+    //cublasHandle_t handle;
+    //cublasCreate(&handle);
     //cublasSetStream(handle, stream);
 
     //calculate PF^T, n*n  F is row major, so no need CUBLAS_OP_T for F
@@ -571,11 +571,11 @@ void make_cov_prediction(tracker &tracker, int num_current_tracks){
     }
     cudaMemcpy(d_P_predict,d_P,sizeof(float)*n*n*totaltracks,cudaMemcpyDeviceToDevice);
     
-    cublasDestroy(handle);
+    //cublasDestroy(handle);
     //cudaStreamDestroy(stream);
 }
 
-void update_states_Kalman(tracker &tracker, int num_current_tracks){
+void update_states_Kalman(tracker &tracker, int num_current_tracks, cublasHandle_t handle){
     //wrapper function to calculate posterior updated states with kalman gain for each matched tracks
     // innovation y = d_Z   -   H      *    x_predicted
     //                m*M      m*n             n*N
@@ -597,8 +597,8 @@ void update_states_Kalman(tracker &tracker, int num_current_tracks){
     int totaltracks = num_current_tracks;
     const float alpha = 1.0f;
     const float beta = 0.0f;
-    cublasHandle_t handle;
-    cublasCreate(&handle);
+    //cublasHandle_t handle;
+    //cublasCreate(&handle);
 
     //calculate H*x_p, m*N
     //need result in row major order m*N
@@ -655,11 +655,11 @@ void update_states_Kalman(tracker &tracker, int num_current_tracks){
         printf("CUDA error on X_update kernel: %s\n", cudaGetErrorString(errorb));
     }
 
-    cublasDestroy(handle);
+    //cublasDestroy(handle);
 
 }
 
-void update_Pcov(tracker &tracker, int num_current_tracks){
+void update_Pcov(tracker &tracker, int num_current_tracks,cublasHandle_t handle){
     //wrapper function to calculate posterior updated covariance with kalman gain for each matched tracks
     // updated   P       =   (I-        K     *  H   )   *   P
     //           n*n         n*n       n*m      m*n         n*n
@@ -676,8 +676,8 @@ void update_Pcov(tracker &tracker, int num_current_tracks){
     int totaltracks = num_current_tracks;
     const float alpha = 1.0f;
     const float beta = 0.0f;
-    cublasHandle_t handle;
-    cublasCreate(&handle);
+    //cublasHandle_t handle;
+    //cublasCreate(&handle);
 
     //calculate K*H, n*n
     //result in col major order n*n
@@ -725,7 +725,7 @@ void update_Pcov(tracker &tracker, int num_current_tracks){
         printf("CUDA error on Pcov update cublas: %s\n", cudaGetErrorString(errorb));
     }
 
-    cublasDestroy(handle);
+    //cublasDestroy(handle);
 }
 
 void update_track_status(tracker &tracker, int num_current_tracks){

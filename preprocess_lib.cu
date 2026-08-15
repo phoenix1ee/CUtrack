@@ -277,7 +277,7 @@ void NMS(float* d_raw_detections, int* d_raw_class_id, int Num_raw_detection, in
     //input: model output tensor 1*84*8400, row major
     //output: the input raw detection array at 5*8400, row 0-4, each col: 4 coordinates value + 1 score
 
-//find best class
+    //find best class
     dim3 block(256,1,1);
     dim3 grid((Num_raw_detection+255)/256,1,1);
     float validthreshold = 0.25;
@@ -289,7 +289,7 @@ void NMS(float* d_raw_detections, int* d_raw_class_id, int Num_raw_detection, in
         printf("best class kernel failed: %s\n", cudaGetErrorString(errora));
     }
 
-//sort using thrust
+    //sort using thrust
     // Initialize indices: [0, 1, 2, 3]
     thrust::device_vector<int> col_indices(Num_raw_detection);
     thrust::sequence(col_indices.begin(), col_indices.end());
@@ -309,7 +309,8 @@ void NMS(float* d_raw_detections, int* d_raw_class_id, int Num_raw_detection, in
     if (errora != cudaSuccess){
         printf("final detection update kernel failed: %s\n", cudaGetErrorString(errora));
     }
-//suppress duplicate with detection IOU
+    
+    //suppress duplicate with detection IOU
     //use the raw array as buffer
     float suppressthreshold = 0.4;
     NMS_refine<<<grid,block>>>(d_buffer_detections,d_raw_detections,
